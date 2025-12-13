@@ -83,6 +83,7 @@ void child_work(char* src, char** dst){
     start_copy(src, dst);
     
     synchronize(src, dst);
+    printf("END OF LIFE \n");
 }
 
 int synchro_present(char* src, char* dst, workerList* workers){

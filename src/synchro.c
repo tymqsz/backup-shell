@@ -24,6 +24,7 @@ static WatchMap *watch_head = NULL;
 
 // Dodaje mapowanie wd -> path
 void add_watch_mapping(int wd, const char *path) {
+    printf("adding %s \n", path);
     WatchMap *node = malloc(sizeof(WatchMap));
     if (!node) { perror("malloc"); return; }
     node->wd = wd;
@@ -45,11 +46,13 @@ const char* get_path_from_wd(int wd) {
 // Rekurencyjne dodawanie obserwacji (inotify watch) dla katalogów
 void add_watches_recursive(int fd, const char *path) {
     // Dodajemy watch na obecny katalog (IN_CREATE wykryje nowe pliki/foldery, IN_CLOSE_WRITE zmiany w plikach)
-    int wd = inotify_add_watch(fd, path, IN_CREATE | IN_MOVED_TO | IN_CLOSE_WRITE | IN_DELETE | IN_MOVED_FROM);
+    printf("%s -<<<<\n", path);
+    int wd = inotify_add_watch(fd, path, IN_CREATE | IN_MOVED_TO | IN_CLOSE_WRITE | IN_DELETE | IN_MOVED_FROM | IN_DELETE_SELF);
     
     if (wd == -1) {
         // Ignorujemy błędy dla plików, które nie są katalogami (chociaż opendir niżej i tak to przefiltruje)
         // lub brak uprawnień
+
     } else {
         add_watch_mapping(wd, path);
     }
@@ -73,20 +76,19 @@ void add_watches_recursive(int fd, const char *path) {
 
 
 
-
 void synchronize(const char *source_dir, char **target_dirs) {
     int fd = inotify_init();
     if (fd < 0) {
         perror("inotify_init");
         return;
     }
-    
     add_watches_recursive(fd, source_dir);
 
     char buffer[BUF_LEN];
     int length, i = 0;
 
-    while (1) {
+    int EOL = 0;
+    while (!EOL) {
         length = read(fd, buffer, BUF_LEN);
         if (length < 0) {
             perror("read");
@@ -96,13 +98,20 @@ void synchronize(const char *source_dir, char **target_dirs) {
         i = 0;
         while (i < length) {
             struct inotify_event *event = (struct inotify_event *)&buffer[i];
-            
+            const char *src_dir_path = get_path_from_wd(event->wd);
+            if(strcmp(src_dir_path, source_dir) == 0 && (event->mask & IN_DELETE_SELF)){
+                EOL = 1;
+                break;
+            }
+
             if (event->len) {
-                const char *src_dir_path = get_path_from_wd(event->wd);
-                
                 if (src_dir_path) {
                     char full_src_path[MAX_PATH];
                     
+                    printf("%s vs %s \n", src_dir_path, source_dir);
+                    if(strcmp(src_dir_path, source_dir) == 0){
+                        printf("DUPA HUJ\n");
+                    }
                     // 1. Construct Source Path
                     snprintf(full_src_path, sizeof(full_src_path), "%s/%s", src_dir_path, event->name);
 

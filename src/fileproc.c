@@ -75,7 +75,7 @@ int create_directories(const char *path) {
     for (p = temp_path + 1; *p; p++) {
         if (*p == '/') {
             *p = '\0';
-
+            
             /* create middle directory */
             if (mkdir(temp_path, 0777) && errno != EEXIST) {
                 return -1;
@@ -218,51 +218,55 @@ int copy_single_file(const char *src, const char *dest, const char *base_src, co
     return 0;
 }
 
-int copy_files(char **file_paths, size_t count, const char *base_path, const char *target_dir) {
+int copy_files(char **file_paths, size_t count, const char *base_path, char **target_dirs) {
     struct stat st;
 
     for (size_t i = 0; i < count; i++) {
         const char *src_path = file_paths[i];
-        const char *rel_path;
-        char dest_path[MAX_BUF];
-        char dest_dir[MAX_BUF];
-
-        size_t base_len = strlen(base_path);
         
-        /*if (strncmp(src_path, base_path, base_len) != 0) {
-            continue;
-        }*/
-
-        rel_path = src_path + base_len;
-        if (*rel_path == '/') {
-            rel_path++;
-        }
-
-        snprintf(dest_path, MAX_BUF, "%s/%s", target_dir, rel_path);
-
-
+        // Optimization: Stat the source once before looping through targets
         if (stat(src_path, &st) == -1) {
             perror("stat");
             continue;
         }
 
-        if (S_ISDIR(st.st_mode)) {
-            if (create_directories(dest_path) != 0) {
-                fprintf(stderr, "Failed to create directory %s\n", dest_path);
-            }
-        } else {
-            /* if dest path points to file -> extract parent dir*/
-            char *last_slash = strrchr(dest_path, '/');
-            if (last_slash != NULL) {
-                size_t dir_len = last_slash - dest_path;
-                strncpy(dest_dir, dest_path, dir_len);
-                dest_dir[dir_len] = '\0';
-                
-                create_directories(dest_dir);
-            }
+        // Calculate relative path once
+        size_t base_len = strlen(base_path);
+        const char *rel_path = src_path + base_len;
+        if (*rel_path == '/') {
+            rel_path++;
+        }
 
-            if (copy_single_file(src_path, dest_path, base_path, target_dir) != 0) {
-                fprintf(stderr, "Failed to copy file %s\n", src_path);
+        // --- Inner Loop: Iterate through all target directories ---
+        for (int t = 0; target_dirs[t] != NULL; t++) {
+            const char *current_target_root = target_dirs[t];
+            char dest_path[MAX_BUF];
+            char dest_dir[MAX_BUF];
+
+            // Construct specific destination path for this target
+            snprintf(dest_path, MAX_BUF, "%s/%s", current_target_root, rel_path);
+
+            if (S_ISDIR(st.st_mode)) {
+                // Case: Directory
+                if (create_directories(dest_path) != 0) {
+                    fprintf(stderr, "Failed to create directory %s\n", dest_path);
+                }
+            } else {
+                // Case: File
+                /* extract parent dir from dest_path */
+                char *last_slash = strrchr(dest_path, '/');
+                if (last_slash != NULL) {
+                    size_t dir_len = last_slash - dest_path;
+                    strncpy(dest_dir, dest_path, dir_len);
+                    dest_dir[dir_len] = '\0';
+                    
+                    create_directories(dest_dir);
+                }
+
+                // Copy the file to this specific target
+                if (copy_single_file(src_path, dest_path, base_path, current_target_root) != 0) {
+                    fprintf(stderr, "Failed to copy file %s to %s\n", src_path, dest_path);
+                }
             }
         }
     }
@@ -327,34 +331,49 @@ int remove_directory_recursive(const char *path) {
     return r;
 }
 
-void start_copy(char* source, char* target){
+void start_copy(char* source, char** targets){
     char **file_paths = NULL;
     size_t path_count = 0;
     size_t path_capacity = 0;
     
     find_files_recursive(source, &file_paths, &path_count, &path_capacity);
 
-    copy_files(file_paths, path_count, source, target);
+    copy_files(file_paths, path_count, source, targets);
 
     free_paths(file_paths, path_count);
 }
 
-int setup_target_dir(const char *t_path) {
+int setup_target_dirs(const char **t_paths) {
     struct stat st;
+    int i = 0;
 
-    if (stat(t_path, &st) == 0) {
-        
-        if (!S_ISDIR(st.st_mode)) {
-             return -1;
+    // Loop until we hit the NULL terminator in the array
+    while (t_paths[i] != NULL) {
+        const char *current_path = t_paths[i];
+
+        // Check if the path exists
+        if (stat(current_path, &st) == 0) {
+            
+            // If it exists but is NOT a directory, that's an error
+            if (!S_ISDIR(st.st_mode)) {
+                 fprintf(stderr, "Error: '%s' exists but is not a directory.\n", current_path);
+                 return -1;
+            }
+
+            // It exists and is a directory: wipe it clean
+            if (remove_directory_recursive(current_path) != 0) {
+                fprintf(stderr, "Error: Failed to clean up '%s'.\n", current_path);
+                return -1;
+            }
         }
-
-        if (remove_directory_recursive(t_path) != 0) {
+        
+        // Create the fresh directory
+        if (mkdir(current_path, 0777) != 0) {
+            perror("mkdir");
             return -1;
         }
-    }
-    
-    if (mkdir(t_path, 0777) != 0) {
-        return -1;
+
+        i++;
     }
 
     return 0;

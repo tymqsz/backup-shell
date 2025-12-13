@@ -25,7 +25,7 @@ void free_paths(char**, size_t);
 
 int remove_directory_recursive(const char *path);
 
-int setup_target_dir(const char *t_path);
+int setup_target_dirs(char **t_path);
 
-void start_copy(char* source, char* target);
+void start_copy(char* src, char** dsts);
 #endif

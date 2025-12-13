@@ -7,6 +7,7 @@
 #include <sys/inotify.h>
 #include <unistd.h>
 #include <limits.h>
+#include <signal.h>
 
 #include "fileproc.h"
 #include "synchro.h"
@@ -63,5 +64,6 @@ int main(){
         }
     }
 
+    kill(0, SIGTERM);
     return 0;
 }

@@ -93,58 +93,42 @@ int create_directories(const char *path) {
 int copy_single_file(const char *src, const char *dest, const char *base_src, const char *base_dest) {
     struct stat st;
     
-    // Używamy lstat zamiast stat, aby sprawdzić sam plik, a nie to, na co wskazuje (jeśli to link)
     if (lstat(src, &st) == -1) {
         perror("lstat error");
         return -1;
     }
-
-    // 1. OBSŁUGA DOWIĄZAŃ SYMBOLICZNYCH (SYMLINKS)
     if (S_ISLNK(st.st_mode)) {
         char link_target[MAX_BUF];
         char final_target[MAX_BUF];
         ssize_t len;
 
-        // Odczytujemy, gdzie wskazuje dowiązanie
         len = readlink(src, link_target, sizeof(link_target) - 1);
         if (len == -1) {
             perror("readlink error");
             return -1;
         }
-        link_target[len] = '\0'; // Null-terminate
+        link_target[len] = '\0';
 
-        // Logika przepisywania ścieżki:
-        // Sprawdzamy, czy link jest absolutny (zaczyna się od /)
-        // ORAZ czy zaczyna się od ścieżki bazowej źródła
+        /* if link points to local file change target accordingly */
         size_t base_src_len = strlen(base_src);
-        
         if (link_target[0] == '/' && strncmp(link_target, base_src, base_src_len) == 0) {
-            // Sprawdzamy, czy zaraz po prefiksie jest koniec napisu lub separator '/'
-            // (zabezpieczenie przed sytuacją: base="/src", link="/src_backup/file")
+            // base="/src", link="/src_backup/file"
             if (link_target[base_src_len] == '/' || link_target[base_src_len] == '\0') {
-                
-                // Budujemy nową ścieżkę: BaseTarget + (LinkTarget - BaseSrc)
-                // Przykład: 
-                // Link: /home/user/source/plik.txt
-                // BaseSrc: /home/user/source
-                // BaseDest: /home/user/target
-                // Wynik: /home/user/target/plik.txt
                 
                 const char *suffix = link_target + base_src_len;
                 snprintf(final_target, sizeof(final_target), "%s%s", base_dest, suffix);
             } else {
-                // Fałszywy alarm (podobny prefiks, ale inny folder), kopiujemy bez zmian
+                /* link is external */
                 strcpy(final_target, link_target);
             }
         } else {
-            // Ścieżka relatywna lub prowadząca poza katalog źródłowy -> kopiujemy bez zmian
+            /* link is external */
             strcpy(final_target, link_target);
         }
 
-        // Usuwamy cel, jeśli istnieje (żeby móc utworzyć link)
-        unlink(dest);
+        
+        //unlink(dest);
 
-        // Tworzymy symlink w miejscu docelowym
         if (symlink(final_target, dest) == -1) {
             perror("symlink creation failed");
             return -1;
@@ -153,13 +137,11 @@ int copy_single_file(const char *src, const char *dest, const char *base_src, co
         return 0;
     }
 
-    // 2. OBSŁUGA KATALOGÓW (Ignorujemy, są tworzone w pętli głównej)
     if (S_ISDIR(st.st_mode)) {
         return 0;
     }
 
-    // 3. OBSŁUGA ZWYKŁYCH PLIKÓW (REGULAR FILES)
-    // Tutaj twoja stara logika kopiowania bajt po bajcie
+    /* TODO: change to thread safe file handling*/
     FILE *src_file, *dst_file;
     char buffer[MAX_BUF];
     size_t bytes_read;
@@ -186,8 +168,7 @@ int copy_single_file(const char *src, const char *dest, const char *base_src, co
         }
     }
     
-    // Kopiowanie uprawnień (chmod)
-    fchmod(fileno(dst_file), st.st_mode);
+    //fchmod(fileno(dst_file), st.st_mode);
 
     fclose(src_file);
     fclose(dst_file);
@@ -227,6 +208,7 @@ int copy_files(char **file_paths, size_t count, const char *base_path, const cha
                 fprintf(stderr, "Failed to create directory %s\n", dest_path);
             }
         } else {
+            /* if dest path points to file -> extract parent dir*/
             char *last_slash = strrchr(dest_path, '/');
             if (last_slash != NULL) {
                 size_t dir_len = last_slash - dest_path;
@@ -257,7 +239,6 @@ int remove_directory_recursive(const char *path) {
     int r = 0;
 
     if (!d) {
-        // Jeśli katalog nie istnieje, jest to OK (np. jest usunięty)
         return 0; 
     }
 
@@ -315,15 +296,8 @@ void start_copy(char* source, char* target){
     free_paths(file_paths, path_count);
 }
 
-int setup_dirs(const char *s_path, const char *t_path) {
+int setup_target_dir(const char *t_path) {
     struct stat st;
-
-    if (stat(s_path, &st) == -1) {
-        return -1;
-    }
-    if (!S_ISDIR(st.st_mode)) {
-        return -1;
-    }
 
     if (stat(t_path, &st) == 0) {
         

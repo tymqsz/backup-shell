@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+#include <fcntl.h>
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
@@ -90,6 +92,36 @@ int create_directories(const char *path) {
     return 0;
 }
 
+ssize_t bulk_read(int fd, char *buf, size_t count) {
+    ssize_t c;
+    ssize_t len = 0;
+    do {
+        c = TEMP_FAILURE_RETRY(read(fd, buf, count));
+        if (c < 0)
+            return c;
+        if (c == 0)
+            return len; // EOF
+        buf += c;
+        len += c;
+        count -= c;
+    } while (count > 0);
+    return len;
+}
+
+ssize_t bulk_write(int fd, char *buf, size_t count) {
+    ssize_t c;
+    ssize_t len = 0;
+    do {
+        c = TEMP_FAILURE_RETRY(write(fd, buf, count));
+        if (c < 0)
+            return c;
+        buf += c;
+        len += c;
+        count -= c;
+    } while (count > 0);
+    return len;
+}
+
 int copy_single_file(const char *src, const char *dest, const char *base_src, const char *base_dest) {
     struct stat st;
     
@@ -141,37 +173,48 @@ int copy_single_file(const char *src, const char *dest, const char *base_src, co
         return 0;
     }
 
-    /* TODO: change to thread safe file handling*/
-    FILE *src_file, *dst_file;
+    int src_fd, dst_fd;
     char buffer[MAX_BUF];
-    size_t bytes_read;
+    ssize_t bytes_read, bytes_written;
+    int result = 0;
 
-    src_file = fopen(src, "rb");
-    if (src_file == NULL) {
-        perror("fopen src");
+    src_fd = open(src, O_RDONLY);
+    if (src_fd < 0) {
+        perror("open src");
         return -1;
     }
 
-    dst_file = fopen(dest, "wb");
-    if (dst_file == NULL) {
-        perror("fopen dest");
-        fclose(src_file);
+    dst_fd = open(dest, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (dst_fd < 0) {
+        perror("open dest");
+        close(src_fd);
         return -1;
     }
 
-    while ((bytes_read = fread(buffer, 1, MAX_BUF, src_file)) > 0) {
-        if (fwrite(buffer, 1, bytes_read, dst_file) != bytes_read) {
-            perror("fwrite");
-            fclose(src_file);
-            fclose(dst_file);
-            return -1;
+    while ((bytes_read = bulk_read(src_fd, buffer, MAX_BUF)) > 0) {
+        bytes_written = bulk_write(dst_fd, buffer, bytes_read);
+        
+        if (bytes_written != bytes_read) {
+            perror("bulk_write");
+            result = -1;
+            break; 
         }
     }
-    
-    //fchmod(fileno(dst_file), st.st_mode);
 
-    fclose(src_file);
-    fclose(dst_file);
+    if (bytes_read < 0) {
+        perror("bulk_read");
+        result = -1;
+    }
+
+    if (close(src_fd) < 0) {
+        perror("close src");
+        result = -1;
+    }
+    
+    if (close(dst_fd) < 0) {
+        perror("close dst");
+        result = -1;
+    }
     return 0;
 }
 

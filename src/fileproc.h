@@ -28,4 +28,6 @@ int remove_directory_recursive(const char *path);
 int setup_target_dir(const char *t_path);
 
 void start_copy(char* source, char* target);
+
+void mirror_restore_recursive(const char *backup_dir, const char *restore_dir);
 #endif

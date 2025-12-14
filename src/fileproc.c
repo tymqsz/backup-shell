@@ -11,6 +11,56 @@
 #define MAX_PATH 1024
 #define MAX_BUF 1024
 
+int remove_directory_recursive(const char *path) {
+    DIR *d = opendir(path);
+    size_t path_len = strlen(path);
+    int r = 0;
+
+    if (!d) {
+        return 0; 
+    }
+
+    struct dirent *p;
+    while ((p = readdir(d))) {
+        int r2;
+        char *buf;
+        size_t len;
+
+        if (!strcmp(p->d_name, ".") || !strcmp(p->d_name, "..")) continue;
+
+        len = path_len + strlen(p->d_name) + 2; 
+        buf = malloc(len);
+
+        if (buf) {
+            snprintf(buf, len, "%s/%s", path, p->d_name);
+            struct stat statbuf;
+            
+            // Używamy lstat, żeby nie podążać za dowiązaniami symbolicznymi (chyba że są w katalogu do usunięcia)
+            if (lstat(buf, &statbuf) == -1) {
+                perror("lstat");
+                r = -1;
+                free(buf);
+                continue;
+            }
+
+            if (S_ISDIR(statbuf.st_mode)) {
+                r2 = remove_directory_recursive(buf); // REKURENCJA
+            } else {
+                r2 = unlink(buf); // Usuwamy plik/link
+            }
+            
+            if (r2) r = -1;
+            free(buf);
+        }
+    }
+    closedir(d);
+
+    if (r == 0) {
+        r = rmdir(path);
+    }
+    
+    return r;
+}
 /* save path to paths array*/
 void add_path(char ***paths, size_t *count, size_t *capacity, const char *path) {
     if (*count >= *capacity) {
@@ -269,6 +319,63 @@ int copy_files(char **file_paths, size_t count, const char *base_path, const cha
     return 0;
 }
 
+void mirror_restore_recursive(const char *backup_dir, const char *restore_dir) {
+    DIR *b_dir = opendir(backup_dir);
+    
+    if (!b_dir) {
+        return; 
+    }
+
+    struct dirent *dp;
+    char backup_full[PATH_MAX];
+    char restore_full[PATH_MAX];
+    
+    while ((dp = readdir(b_dir)) != NULL) {
+        if (strcmp(dp->d_name, ".") == 0 || strcmp(dp->d_name, "..") == 0) continue;
+
+        snprintf(backup_full, PATH_MAX, "%s/%s", backup_dir, dp->d_name);
+        snprintf(restore_full, PATH_MAX, "%s/%s", restore_dir, dp->d_name);
+
+        struct stat b_st;
+        if (lstat(backup_full, &b_st) == -1) continue;
+
+        if (S_ISDIR(b_st.st_mode)) {
+            create_directories(restore_full); 
+            mirror_restore_recursive(backup_full, restore_full);
+        } else {
+            struct stat r_st;
+            if (lstat(restore_full, &r_st) == -1 || b_st.st_mtime > r_st.st_mtime) {
+                copy_single_file(backup_full, restore_full, backup_dir, restore_dir);
+            }
+        }
+    }
+    closedir(b_dir);
+    
+    DIR *r_dir = opendir(restore_dir);
+    if (!r_dir) return; 
+
+    while ((dp = readdir(r_dir)) != NULL) {
+        if (strcmp(dp->d_name, ".") == 0 || strcmp(dp->d_name, "..") == 0) continue;
+
+        snprintf(backup_full, PATH_MAX, "%s/%s", backup_dir, dp->d_name); 
+        snprintf(restore_full, PATH_MAX, "%s/%s", restore_dir, dp->d_name); 
+
+        if (lstat(backup_full, &(struct stat){0}) == -1 && errno == ENOENT) {
+            
+            struct stat r_st;
+            if (lstat(restore_full, &r_st) == -1) continue;
+
+            if (S_ISDIR(r_st.st_mode)) {
+                 remove_directory_recursive(restore_full);
+            } else {
+                 unlink(restore_full);
+            }
+        }
+    }
+
+    closedir(r_dir);
+}
+
 void free_paths(char **paths, size_t count) {
     for (size_t i = 0; i < count; i++) {
         free(paths[i]);
@@ -276,56 +383,7 @@ void free_paths(char **paths, size_t count) {
     free(paths);
 }
 
-int remove_directory_recursive(const char *path) {
-    DIR *d = opendir(path);
-    size_t path_len = strlen(path);
-    int r = 0;
 
-    if (!d) {
-        return 0; 
-    }
-
-    struct dirent *p;
-    while ((p = readdir(d))) {
-        int r2;
-        char *buf;
-        size_t len;
-
-        if (!strcmp(p->d_name, ".") || !strcmp(p->d_name, "..")) continue;
-
-        len = path_len + strlen(p->d_name) + 2; 
-        buf = malloc(len);
-
-        if (buf) {
-            snprintf(buf, len, "%s/%s", path, p->d_name);
-            struct stat statbuf;
-            
-            // Używamy lstat, żeby nie podążać za dowiązaniami symbolicznymi (chyba że są w katalogu do usunięcia)
-            if (lstat(buf, &statbuf) == -1) {
-                perror("lstat");
-                r = -1;
-                free(buf);
-                continue;
-            }
-
-            if (S_ISDIR(statbuf.st_mode)) {
-                r2 = remove_directory_recursive(buf); // REKURENCJA
-            } else {
-                r2 = unlink(buf); // Usuwamy plik/link
-            }
-            
-            if (r2) r = -1;
-            free(buf);
-        }
-    }
-    closedir(d);
-
-    if (r == 0) {
-        r = rmdir(path);
-    }
-    
-    return r;
-}
 
 void start_copy(char* source, char* target){
     char **file_paths = NULL;

@@ -142,6 +142,9 @@ int main(){
             free(argv);
             break;
         }
+        else if(strcmp(cmd, "restore") == 0){
+            mirror_restore_recursive(argv[2], argv[1]);
+        }
         else{
             printf("command unknown\n");
         }

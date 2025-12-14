@@ -45,7 +45,7 @@ const char* get_path_from_wd(int wd) {
 // Rekurencyjne dodawanie obserwacji (inotify watch) dla katalogów
 void add_watches_recursive(int fd, const char *path) {
     // Dodajemy watch na obecny katalog (IN_CREATE wykryje nowe pliki/foldery, IN_CLOSE_WRITE zmiany w plikach)
-    int wd = inotify_add_watch(fd, path, IN_CREATE | IN_MOVED_TO | IN_CLOSE_WRITE | IN_DELETE | IN_MOVED_FROM);
+    int wd = inotify_add_watch(fd, path, IN_CREATE | IN_MOVED_TO | IN_CLOSE_WRITE | IN_DELETE | IN_MOVED_FROM | IN_DELETE_SELF);
     
     if (wd == -1) {
         // Ignorujemy błędy dla plików, które nie są katalogami (chociaż opendir niżej i tak to przefiltruje)
@@ -86,7 +86,8 @@ void synchronize(const char *source_dir, char **target_dirs) {
     char buffer[BUF_LEN];
     int length, i = 0;
 
-    while (1) {
+    int source_deleted = 0;
+    while (!source_deleted) {
         length = read(fd, buffer, BUF_LEN);
         if (length < 0) {
             perror("read");
@@ -97,7 +98,17 @@ void synchronize(const char *source_dir, char **target_dirs) {
         while (i < length) {
             struct inotify_event *event = (struct inotify_event *)&buffer[i];
             
-            if (event->len) {
+            /* IN_SELF_DELETE */
+            /* TODO: del const? */
+            if(event->len == 0){
+                const char *src_dir_path = get_path_from_wd(event->wd);
+
+                if(strcmp(src_dir_path, source_dir)==0 && (event->mask & IN_DELETE_SELF)){
+                    source_deleted = 1;
+                    break;
+                }
+            }
+            else {
                 const char *src_dir_path = get_path_from_wd(event->wd);
                 
                 if (src_dir_path) {

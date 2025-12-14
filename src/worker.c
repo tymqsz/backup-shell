@@ -83,6 +83,8 @@ void child_work(char* src, char** dst){
     start_copy(src, dst);
     
     synchronize(src, dst);
+
+    kill(getppid(), SIGUSR1);
 }
 
 int synchro_present(char* src, char* dst, workerList* workers){

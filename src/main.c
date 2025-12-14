@@ -8,10 +8,33 @@
 #include <unistd.h>
 #include <limits.h>
 #include <signal.h>
+#include <fcntl.h>
 
 #include "fileproc.h"
 #include "synchro.h"
 #include "worker.h"
+
+#define ERR(source) \
+    (fprintf(stderr, "%s:%d\n", __FILE__, __LINE__), perror(source), kill(0, SIGKILL), exit(EXIT_FAILURE))
+
+
+workerList* workers;
+
+void handleChildDeath(int sig, siginfo_t* info, void* v){
+    printf("RECIEVED from [%d] \n", info->si_pid);
+    delete_worker(info->si_pid, workers);
+}
+
+void setHandler(void (*f)(int, siginfo_t*, void* ), int sigNo)
+{
+    struct sigaction act;
+    memset(&act, 0, sizeof(struct sigaction));
+    act.sa_sigaction = f;
+    act.sa_flags = SA_RESTART | SA_SIGINFO ; /* dont brake the main loop (handle interrupt) */
+
+    if (-1 == sigaction(sigNo, &act, NULL))
+        ERR("sigaction");
+}
 
 char** split_line(char *line, int *count) {
     if (line[0] != '\0' && line[strlen(line) - 1] == '\n') {
@@ -57,9 +80,10 @@ char** split_line(char *line, int *count) {
 }
 
 int main(){
+    setHandler(handleChildDeath, SIGUSR1);
     char line[2 * PATH_MAX + 50]; 
 
-    workerList* workers;
+    
     init_workerList(&workers);
 
     while (1) {

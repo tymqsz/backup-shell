@@ -7,6 +7,8 @@
 #include <sys/inotify.h>
 #include <unistd.h>
 #include <limits.h>
+#include <signal.h>
+#include <fcntl.h>
 
 #include "worker.h"
 #include "synchro.h"
@@ -22,15 +24,11 @@ void add_worker(char* src, char** dsts, int dst_cnt, pid_t pid, workerList* work
         workers->capacity += 16;
     }
     
-    workers->list[workers->size].source = strdup(src);
     workers->list[workers->size].dst_count = dst_cnt;
     workers->list[workers->size].source = strdup(src);
 
 
     if (workers->list[workers->size].source == NULL) exit(EXIT_FAILURE);
-
-    // 3. Deep Copy the Destinations Array (CRITICAL FIX)
-    // Allocate memory for the array of pointers (+1 for the NULL terminator)
     char **dst_copy = malloc((dst_cnt + 1) * sizeof(char*));
     if (dst_copy == NULL) exit(EXIT_FAILURE);
 
@@ -41,13 +39,46 @@ void add_worker(char* src, char** dsts, int dst_cnt, pid_t pid, workerList* work
     }
     dst_copy[dst_cnt] = NULL; // Ensure it is NULL-terminated
 
-    // Assign the NEW copy to the struct
     workers->list[workers->size].destinations = dst_copy;
 
 
     workers->list[workers->size].pid = pid;
 
     workers->size++;
+}
+
+void delete_worker(pid_t pid, workerList* workers) {
+    int index = -1;
+
+    for (int i = 0; i < workers->size; i++) {
+        if (workers->list[i].pid == pid) {
+            index = i;
+            break;
+        }
+    }
+    // PID not found
+    if (index == -1) {
+        return;
+    }
+
+    free(workers->list[index].source);
+
+    // We used strdup for every destination string, and malloc for the array
+    if (workers->list[index].destinations != NULL) {
+        for (int j = 0; j < workers->list[index].dst_count; j++) {
+            free(workers->list[index].destinations[j]);
+        }
+        free(workers->list[index].destinations);
+    }
+
+    if (index < workers->size - 1) {
+        memmove(
+            &workers->list[index],  
+            &workers->list[index + 1],
+            sizeof(worker) * (workers->size - index - 1)
+        );
+    }
+    workers->size--;
 }
 
 void init_workerList(workerList** workers){

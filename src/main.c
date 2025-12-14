@@ -8,62 +8,146 @@
 #include <unistd.h>
 #include <limits.h>
 #include <signal.h>
+#include <fcntl.h>
+#include <sys/wait.h>
 
 #include "fileproc.h"
 #include "synchro.h"
 #include "worker.h"
 
-int main(){
-    char input_line[2 * PATH_MAX + 50]; 
-    char command[10];
-    char arg1[PATH_MAX], arg2[PATH_MAX];
+#define ERR(source) \
+    (fprintf(stderr, "%s:%d\n", __FILE__, __LINE__), perror(source), kill(0, SIGKILL), exit(EXIT_FAILURE))
 
-    workerList* workers;
+
+workerList* workers;
+
+void handleChildDeath(int sig, siginfo_t* info, void* v){
+    //waitpid(info->si_pid, NULL, WNOHANG);
+
+    delete_workers(info->si_pid, workers);
+}
+
+void setHandler(void (*f)(int, siginfo_t*, void* ), int sigNo)
+{
+    struct sigaction act;
+    memset(&act, 0, sizeof(struct sigaction));
+    act.sa_sigaction = f;
+    act.sa_flags = SA_RESTART | SA_SIGINFO; 
+
+    if (-1 == sigaction(sigNo, &act, NULL))
+        ERR("sigaction");
+}
+
+char** split_line(char *line, int *count) {
+    if (line[0] != '\0' && line[strlen(line) - 1] == '\n') {
+        line[strlen(line) - 1] = '\0';
+    }
+
+    char *temp_line = strdup(line);
+    if (temp_line == NULL) return NULL;
+
+    char *token;
+    char *saveptr;
+    *count = 0;
+    
+    token = strtok_r(temp_line, " ", &saveptr);
+    while (token != NULL) {
+        if (token[0] != '\0') (*count)++;
+        token = strtok_r(NULL, " ", &saveptr);
+    }
+    
+    if (*count == 0) {
+        free(temp_line);
+        return NULL;
+    }
+
+    char **args = (char **)malloc((*count + 1) * sizeof(char *));
+    if (args == NULL) {
+        free(temp_line);
+        return NULL;
+    }
+
+    int i = 0;
+    token = strtok_r(line, " ", &saveptr);
+    while (token != NULL) {
+        if (token[0] != '\0') {
+            args[i++] = token;
+        }
+        token = strtok_r(NULL, " ", &saveptr);
+    }
+
+    args[*count] = NULL; 
+    free(temp_line);
+    return args;
+}
+
+int main(){
+    setHandler(handleChildDeath, SIGUSR1);
+    char line[2 * PATH_MAX + 50]; 
+
     init_workerList(&workers);
 
     while (1) {
         printf("SyncShell> ");
-        if (fgets(input_line, sizeof(input_line), stdin) == NULL) {
+        if (fgets(line, sizeof(line), stdin) == NULL) {
             break;
         }
-        input_line[strcspn(input_line, "\n")] = 0;
+        line[strcspn(line, "\n")] = 0;
 
+        int argc;
+        char** argv = split_line(line, &argc);
+        if(argv == NULL || argc == 0)
+            continue;
 
-        if (sscanf(input_line, "%9s %s %[^\n]", command, arg1, arg2) >= 1) {
-            
-            if (strcmp(command, "add") == 0) {
+        char* cmd = argv[0];
+        
+        if(strcmp(cmd, "add") == 0){
+            if(argc < 3){
+                printf("Usage: add <source> <dest1> [dest2] ...\n");
+                free(argv); // Don't forget to free
+                continue;
+            }
+
+            char* source = argv[1];
+
+            // Loop through every destination argument provided
+            for(int i = 2; i < argc; i++) {
+                char* current_dest = argv[i];
+
+                // Validate this specific source->dest pair
+                if(!prep_dirs(source, current_dest, workers)){
+                    printf("Skipping invalid target: %s\n", current_dest);
+                    continue;
+                }
+                
                 pid_t pid = fork();
-                if(pid < 0)
-                    exit(EXIT_FAILURE);
+                if (pid < 0) {
+                    perror("fork");
+                } 
                 else if(pid == 0){
-                    child_work(arg1, arg2);
+                    child_work(source, current_dest);
                     exit(EXIT_SUCCESS);
                 }
                 
-                if(verify_src_dst(arg1, arg2, workers))
-                    add_worker(arg1, arg2, pid, workers);
-                else
-                    printf("incorr\n");
-            } 
-            else if (strcmp(command, "end") == 0) {
-                printf("end\n");
-            } 
-            else if (strcmp(command, "list") == 0) {
-                display_workerList(workers);
-            } 
-            else if (strcmp(command, "exit") == 0) {
-                break; 
+                add_worker(source, current_dest, pid, workers);
             }
-            else {
-                fprintf(stderr, "Nieznane polecenie. Użyj: add, end, list, restore, exit.\n");
-            }
-
-        } else if (strcmp(input_line, "list") == 0) {
-        } else {
-            fprintf(stderr, "Niepoprawny format polecenia.\n");
         }
+        else if(strcmp(cmd, "list") == 0){
+            display_workerList(workers);
+        }
+        else if(strcmp(cmd, "exit") == 0){
+            free(argv);
+            break;
+        }
+        else{
+            printf("command unknown\n");
+        }
+        
+        // Free the memory allocated by split_line
+        free(argv); 
     }
 
+    // Clean up
     kill(0, SIGTERM);
     return 0;
 }

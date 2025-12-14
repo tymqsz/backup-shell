@@ -7,6 +7,8 @@
 #include <sys/inotify.h>
 #include <unistd.h>
 #include <limits.h>
+#include <signal.h>
+#include <fcntl.h>
 
 #include "worker.h"
 #include "synchro.h"
@@ -27,6 +29,53 @@ void add_worker(char* src, char* dst, pid_t pid, workerList* workers){
     workers->list[workers->size].pid = pid;
 
     workers->size++;
+}
+
+void delete_workers(pid_t pid, workerList* workers) {
+    if (workers == NULL || workers->size == 0) return;
+
+    char* target_src = NULL;
+
+    // 1. Find the Source path associated with the given PID
+    for (int i = 0; i < workers->size; i++) {
+        if (workers->list[i].pid == pid) {
+            // Duplicate the string so we can safely compare it 
+            // even after freeing the specific worker entry.
+            if (workers->list[i].source != NULL) {
+                target_src = strdup(workers->list[i].source);
+            }
+            break;
+        }
+    }
+
+    // If PID not found or source was NULL, exit
+    if (target_src == NULL) {
+        return;
+    }
+
+    // 2. Iterate through the list and filter out matches
+    int write_idx = 0; // The position where we keep valid workers
+
+    for (int i = 0; i < workers->size; i++) {
+        
+        // Check if the current worker shares the same source
+        if (strcmp(workers->list[i].source, target_src) == 0) {
+            free(workers->list[i].source);
+            if (workers->list[i].destination != NULL) {
+                free(workers->list[i].destination);
+            }
+
+        } else {
+        
+            if (i != write_idx) {
+                workers->list[write_idx] = workers->list[i];
+            }
+            write_idx++;
+        }
+    }
+    workers->size = write_idx;
+
+    free(target_src);
 }
 
 void init_workerList(workerList** workers){
@@ -50,6 +99,8 @@ void child_work(char* src, char* dst){
     start_copy(src, dst);
     
     synchronize(src, dst);
+
+    kill(getppid(), SIGUSR1);
 }
 
 int synchro_present(char* src, char* dst, workerList* workers){

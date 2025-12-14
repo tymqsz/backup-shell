@@ -9,6 +9,7 @@
 #include <limits.h>
 
 #include "fileproc.h"
+#include "worker.h"
 
 #define EVENT_SIZE  (sizeof(struct inotify_event))
 #define BUF_LEN     (1024 * (EVENT_SIZE + 16))*4
@@ -45,7 +46,7 @@ const char* get_path_from_wd(int wd) {
 // Rekurencyjne dodawanie obserwacji (inotify watch) dla katalogów
 void add_watches_recursive(int fd, const char *path) {
     // Dodajemy watch na obecny katalog (IN_CREATE wykryje nowe pliki/foldery, IN_CLOSE_WRITE zmiany w plikach)
-    int wd = inotify_add_watch(fd, path, IN_CREATE | IN_MOVED_TO | IN_CLOSE_WRITE | IN_DELETE | IN_MOVED_FROM);
+    int wd = inotify_add_watch(fd, path, IN_CREATE | IN_MOVED_TO | IN_CLOSE_WRITE | IN_DELETE | IN_MOVED_FROM | IN_DELETE_SELF);
     
     if (wd == -1) {
         // Ignorujemy błędy dla plików, które nie są katalogami (chociaż opendir niżej i tak to przefiltruje)
@@ -88,8 +89,9 @@ void synchronize(const char *source_dir, const char *target_dir) {
     int length, i = 0;
 
     
-    /* obserwuj foldery */
-    while (1) {
+
+    int source_deleted = 0;
+    while (!source_deleted) {
         length = read(fd, buffer, BUF_LEN);
         if (length < 0) {
             perror("read");
@@ -99,7 +101,15 @@ void synchronize(const char *source_dir, const char *target_dir) {
         i = 0;
         while (i < length) {
             struct inotify_event *event = (struct inotify_event *)&buffer[i];
-            
+            if(event->len == 0){
+                const char *src_dir_path = get_path_from_wd(event->wd);
+
+                if(strcmp(src_dir_path, source_dir)==0 && (event->mask & IN_DELETE_SELF)){
+                    source_deleted = 1;
+                    break;
+                }
+            }
+
             if (event->len) {
                 const char *src_dir_path = get_path_from_wd(event->wd);
                 
@@ -162,4 +172,53 @@ void synchronize(const char *source_dir, const char *target_dir) {
     }
     
     close(fd);
+}
+
+int prep_dirs(char* src, char* dst, workerList* workers) {
+    // --- 1. Validate Source ---
+    struct stat src_stat;
+    if (stat(src, &src_stat) < 0 || !S_ISDIR(src_stat.st_mode)) {
+        fprintf(stderr, "Error: Source %s is invalid or not a directory.\n", src);
+        return 0;
+    }
+
+    // --- 2. Validate Target (Safety Check) ---
+    // Check if this specific synchronization is already running
+    if (synchro_present(src, dst, workers)) {
+        fprintf(stderr, "Error: Synchronization already active for %s -> %s\n", src, dst);
+        return 0;
+    }
+
+    // Check for recursion (if destination is inside source)
+    if (dst_is_subdir(src, dst)) {
+        fprintf(stderr, "Error: Target %s is a subdirectory of source %s (recursion risk).\n", dst, src);
+        return 0;
+    }
+
+    // --- 3. Prepare Target (Destructive Action) ---
+    // Now that we know the target is safe, we proceed to wipe and recreate it.
+    struct stat st;
+
+    // Check if the path exists
+    if (stat(dst, &st) == 0) {
+        // If it exists but is NOT a directory, abort
+        if (!S_ISDIR(st.st_mode)) {
+                fprintf(stderr, "Error: '%s' exists but is not a directory.\n", dst);
+                return 0;
+        }
+
+        // It exists and is a directory: wipe it clean
+        if (remove_directory_recursive(dst) != 0) {
+            fprintf(stderr, "Error: Failed to clean up '%s'.\n", dst);
+            return 0;
+        }
+    }
+    
+    // Create the fresh directory
+    if (mkdir(dst, 0777) != 0) {
+        perror("mkdir");
+        return 0;
+    }
+
+    return 1; // Success
 }

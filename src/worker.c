@@ -104,6 +104,7 @@ void delete_workers_by_paths(char* src, char** dsts, workerList* workers) {
         }
 
         if (should_delete) {
+            kill(workers->list[i].pid, SIGTERM);
             free(workers->list[i].source);
             free(workers->list[i].destination);
 

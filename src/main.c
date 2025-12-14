@@ -19,15 +19,20 @@
     (fprintf(stderr, "%s:%d\n", __FILE__, __LINE__), perror(source), kill(0, SIGKILL), exit(EXIT_FAILURE))
 
 
+volatile sig_atomic_t END = 0;
+
 workerList* workers;
 
 void handleChildDeath(int sig, siginfo_t* info, void* v){
-    //waitpid(info->si_pid, NULL, WNOHANG);
-
     delete_workers_by_pid(info->si_pid, workers);
 }
 
-void setHandler(void (*f)(int, siginfo_t*, void* ), int sigNo)
+void handleInterruption(int sig){
+    /* end of app */
+    END = 1;
+}
+
+void setInfoHandler(void (*f)(int, siginfo_t*, void* ), int sigNo)
 {
     struct sigaction act;
     memset(&act, 0, sizeof(struct sigaction));
@@ -37,6 +42,17 @@ void setHandler(void (*f)(int, siginfo_t*, void* ), int sigNo)
     if (-1 == sigaction(sigNo, &act, NULL))
         ERR("sigaction");
 }
+
+void setHandler(void (*f)(int), int sigNo)
+{
+    struct sigaction act;
+    memset(&act, 0, sizeof(struct sigaction));
+    act.sa_handler = f;
+
+    if (-1 == sigaction(sigNo, &act, NULL))
+        ERR("sigaction");
+}
+
 
 char** split_line(char *line, int *count) {
     if (line[0] != '\0' && line[strlen(line) - 1] == '\n') {
@@ -82,12 +98,22 @@ char** split_line(char *line, int *count) {
 }
 
 int main(){
-    setHandler(handleChildDeath, SIGUSR1);
+    sigset_t mask;
+
+    sigfillset(&mask); 
+    sigdelset(&mask, SIGINT);
+    sigdelset(&mask, SIGTERM);
+    sigdelset(&mask, SIGUSR1);
+    sigprocmask(SIG_SETMASK, &mask, NULL);
+
+    setHandler(handleInterruption, SIGINT);
+    setHandler(handleInterruption, SIGTERM);
+    setInfoHandler(handleChildDeath, SIGUSR1);
     char line[2 * PATH_MAX + 50]; 
 
     init_workerList(&workers);
 
-    while (1) {
+    while (!END) {
         printf("SyncShell> ");
         if (fgets(line, sizeof(line), stdin) == NULL) {
             break;
@@ -125,6 +151,7 @@ int main(){
                     perror("fork");
                 } 
                 else if(pid == 0){
+                    setHandler(SIG_DFL, SIGTERM);
                     child_work(source, current_dest);
                     exit(EXIT_SUCCESS);
                 }

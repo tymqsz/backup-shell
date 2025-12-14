@@ -10,6 +10,7 @@
 
 #include "fileproc.h"
 #include "worker.h"
+#include "utils.h"
 
 #define EVENT_SIZE  (sizeof(struct inotify_event))
 #define BUF_LEN     (1024 * (EVENT_SIZE + 16))*4
@@ -23,7 +24,7 @@ typedef struct WatchMap {
 
 static WatchMap *watch_head = NULL;
 
-// Dodaje mapowanie wd -> path
+
 void add_watch_mapping(int wd, const char *path) {
     WatchMap *node = malloc(sizeof(WatchMap));
     if (!node) { perror("malloc"); return; }
@@ -33,7 +34,6 @@ void add_watch_mapping(int wd, const char *path) {
     watch_head = node;
 }
 
-// Pobiera ścieżkę na podstawie wd
 const char* get_path_from_wd(int wd) {
     WatchMap *current = watch_head;
     while (current) {
@@ -45,22 +45,22 @@ const char* get_path_from_wd(int wd) {
 
 // Rekurencyjne dodawanie obserwacji (inotify watch) dla katalogów
 void add_watches_recursive(int fd, const char *path) {
-    // Dodajemy watch na obecny katalog (IN_CREATE wykryje nowe pliki/foldery, IN_CLOSE_WRITE zmiany w plikach)
-    int wd = inotify_add_watch(fd, path, IN_CREATE | IN_MOVED_TO | IN_CLOSE_WRITE | IN_DELETE | IN_MOVED_FROM | IN_DELETE_SELF);
+    int wd = inotify_add_watch(fd, path, IN_CREATE | IN_MOVED_TO |
+                                         IN_CLOSE_WRITE | IN_DELETE |
+                                         IN_MOVED_FROM | IN_DELETE_SELF);
     
-    if (wd == -1) {
-        // Ignorujemy błędy dla plików, które nie są katalogami (chociaż opendir niżej i tak to przefiltruje)
-        // lub brak uprawnień
-    } else {
-        add_watch_mapping(wd, path);
-    }
+    //if (wd == -1) {
+    //   
+    //  
+    //} else {
+    add_watch_mapping(wd, path);
+    //}
 
     DIR *dir = opendir(path);
     if (!dir) return;
 
     struct dirent *dp;
     char path_buffer[MAX_PATH];
-
     while ((dp = readdir(dir)) != NULL) {
         if (strcmp(dp->d_name, ".") != 0 && strcmp(dp->d_name, "..") != 0) {
             if (dp->d_type == DT_DIR) {
@@ -72,44 +72,38 @@ void add_watches_recursive(int fd, const char *path) {
     closedir(dir);
 }
 
-
-
-
+/* copy all changes in source_dir to target_dir */
 void synchronize(const char *source_dir, const char *target_dir) {
     int fd = inotify_init();
-    if (fd < 0) {
-        perror("inotify_init");
-        return;
-    }
-    
-    /* stworz watchery */
+    if (fd < 0)
+        ERR("inotify_init");
+
     add_watches_recursive(fd, source_dir);
 
     char buffer[BUF_LEN];
     int length, i = 0;
 
-    
-
+    /* synchronize dirs while src present */
     int source_deleted = 0;
     while (!source_deleted) {
-        length = read(fd, buffer, BUF_LEN);
-        if (length < 0) {
-            perror("read");
-            break;
-        }
+        length = read(fd, buffer, BUF_LEN); // TODO: make thread safe
+        if (length < 0)
+            ERR("read");
 
         i = 0;
         while (i < length) {
             struct inotify_event *event = (struct inotify_event *)&buffer[i];
             if(event->len == 0){
                 const char *src_dir_path = get_path_from_wd(event->wd);
-
+                
+                /* check if source_dir present */
                 if(strcmp(src_dir_path, source_dir)==0 && (event->mask & IN_DELETE_SELF)){
                     source_deleted = 1;
                     break;
                 }
             }
 
+            /* file modified */
             if (event->len) {
                 const char *src_dir_path = get_path_from_wd(event->wd);
                 
@@ -132,12 +126,7 @@ void synchronize(const char *source_dir, const char *target_dir) {
                         // Jesteśmy w katalogu głównym: target + / + name (bez rel_path pośrodku)
                         snprintf(full_tgt_path, sizeof(full_tgt_path), "%s/%s", target_dir, event->name);
                     }
-                    // ---------------------
-                    
-                    /* tworzenie dwoch dir naraz */
 
-
-                    // Logika obsługi zdarzeń
                     if (event->mask & IN_ISDIR) {
                         if (event->mask & (IN_CREATE | IN_MOVED_TO)) {
                             mkdir(full_tgt_path, 0777); 
@@ -147,7 +136,6 @@ void synchronize(const char *source_dir, const char *target_dir) {
                             remove_directory_recursive(full_tgt_path);
                         }
                     } else {
-                        // --- OBSŁUGA PLIKÓW ---
                         if (event->mask & (IN_MOVED_TO | IN_CLOSE_WRITE)) {
                             
                             char dest_dir_copy[4096];
@@ -161,7 +149,6 @@ void synchronize(const char *source_dir, const char *target_dir) {
                             copy_single_file(full_src_path, full_tgt_path, source_dir, target_dir);
                         }
                         else if (event->mask & (IN_DELETE | IN_MOVED_FROM)) {
-                            // Usuwanie pliku
                             unlink(full_tgt_path);
                         }
                     }
@@ -174,51 +161,105 @@ void synchronize(const char *source_dir, const char *target_dir) {
     close(fd);
 }
 
-int prep_dirs(char* src, char* dst, workerList* workers) {
-    // --- 1. Validate Source ---
+
+/* return 1 if backup is already in progress otherwise 0 */
+int backup_present(char* src, char* dst, workerList* workers){
+    for(int i = 0; i < workers->size; i++){
+        if(
+            strcmp((workers->list[i]).source, src) == 0 && 
+            strcmp((workers->list[i]).destination, dst) == 0
+        )
+            return 1;
+    }
+
+    return 0;
+}
+
+/*  verify presence of srcdir, cleanup dst 
+*   and make sure backup is not present
+*   returns: 0 on succes otherwise -1
+*/
+int prep_dirs(char* src, char* dst, workerList* workers){
     struct stat src_stat;
-    if (stat(src, &src_stat) < 0 || !S_ISDIR(src_stat.st_mode)) {
-        fprintf(stderr, "Error: Source %s is invalid or not a directory.\n", src);
-        return 0;
-    }
+    if (stat(src, &src_stat) < 0 ||
+        !S_ISDIR(src_stat.st_mode) ||
+        backup_present(src, dst, workers) ||
+        strstr(dst, src) != NULL)
+        return -1;
 
-    // --- 2. Validate Target (Safety Check) ---
-    // Check if this specific synchronization is already running
-    if (synchro_present(src, dst, workers)) {
-        fprintf(stderr, "Error: Synchronization already active for %s -> %s\n", src, dst);
-        return 0;
-    }
-
-    // Check for recursion (if destination is inside source)
-    if (dst_is_subdir(src, dst)) {
-        fprintf(stderr, "Error: Target %s is a subdirectory of source %s (recursion risk).\n", dst, src);
-        return 0;
-    }
-
-    // --- 3. Prepare Target (Destructive Action) ---
-    // Now that we know the target is safe, we proceed to wipe and recreate it.
+    
     struct stat st;
-
-    // Check if the path exists
     if (stat(dst, &st) == 0) {
-        // If it exists but is NOT a directory, abort
-        if (!S_ISDIR(st.st_mode)) {
-                fprintf(stderr, "Error: '%s' exists but is not a directory.\n", dst);
-                return 0;
-        }
+        if (!S_ISDIR(st.st_mode))
+            return -1;
 
-        // It exists and is a directory: wipe it clean
         if (remove_directory_recursive(dst) != 0) {
-            fprintf(stderr, "Error: Failed to clean up '%s'.\n", dst);
-            return 0;
+            return -1;
         }
     }
     
-    // Create the fresh directory
+    /* create the dir (use recursive ??)*/
     if (mkdir(dst, 0777) != 0) {
-        perror("mkdir");
-        return 0;
+        return -1;
     }
 
-    return 1; // Success
+    return 0;
+}
+
+/* restore files from backup_dir to restore_dir */
+void restore(const char *backup_dir, const char *restore_dir) {
+    DIR *b_dir = opendir(backup_dir);
+    
+    if (!b_dir) {
+        return; 
+    }
+
+    struct dirent *dp;
+    char backup_full[PATH_MAX];
+    char restore_full[PATH_MAX];
+    
+    while ((dp = readdir(b_dir)) != NULL) {
+        if (strcmp(dp->d_name, ".") == 0 || strcmp(dp->d_name, "..") == 0) continue;
+
+        snprintf(backup_full, PATH_MAX, "%s/%s", backup_dir, dp->d_name);
+        snprintf(restore_full, PATH_MAX, "%s/%s", restore_dir, dp->d_name);
+
+        struct stat b_st;
+        if (lstat(backup_full, &b_st) == -1) continue;
+
+        if (S_ISDIR(b_st.st_mode)) {
+            create_directories(restore_full); 
+            restore(backup_full, restore_full);
+        } else {
+            struct stat r_st;
+            if (lstat(restore_full, &r_st) == -1 || b_st.st_mtime > r_st.st_mtime) {
+                copy_single_file(backup_full, restore_full, backup_dir, restore_dir);
+            }
+        }
+    }
+    closedir(b_dir);
+    
+    DIR *r_dir = opendir(restore_dir);
+    if (!r_dir) return; 
+
+    while ((dp = readdir(r_dir)) != NULL) {
+        if (strcmp(dp->d_name, ".") == 0 || strcmp(dp->d_name, "..") == 0) continue;
+
+        snprintf(backup_full, PATH_MAX, "%s/%s", backup_dir, dp->d_name); 
+        snprintf(restore_full, PATH_MAX, "%s/%s", restore_dir, dp->d_name); 
+
+        if (lstat(backup_full, &(struct stat){0}) == -1 && errno == ENOENT) {
+            
+            struct stat r_st;
+            if (lstat(restore_full, &r_st) == -1) continue;
+
+            if (S_ISDIR(r_st.st_mode)) {
+                 remove_directory_recursive(restore_full);
+            } else {
+                 unlink(restore_full);
+            }
+        }
+    }
+
+    closedir(r_dir);
 }

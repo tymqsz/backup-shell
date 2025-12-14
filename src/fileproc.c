@@ -319,62 +319,7 @@ int copy_files(char **file_paths, size_t count, const char *base_path, const cha
     return 0;
 }
 
-void mirror_restore_recursive(const char *backup_dir, const char *restore_dir) {
-    DIR *b_dir = opendir(backup_dir);
-    
-    if (!b_dir) {
-        return; 
-    }
 
-    struct dirent *dp;
-    char backup_full[PATH_MAX];
-    char restore_full[PATH_MAX];
-    
-    while ((dp = readdir(b_dir)) != NULL) {
-        if (strcmp(dp->d_name, ".") == 0 || strcmp(dp->d_name, "..") == 0) continue;
-
-        snprintf(backup_full, PATH_MAX, "%s/%s", backup_dir, dp->d_name);
-        snprintf(restore_full, PATH_MAX, "%s/%s", restore_dir, dp->d_name);
-
-        struct stat b_st;
-        if (lstat(backup_full, &b_st) == -1) continue;
-
-        if (S_ISDIR(b_st.st_mode)) {
-            create_directories(restore_full); 
-            mirror_restore_recursive(backup_full, restore_full);
-        } else {
-            struct stat r_st;
-            if (lstat(restore_full, &r_st) == -1 || b_st.st_mtime > r_st.st_mtime) {
-                copy_single_file(backup_full, restore_full, backup_dir, restore_dir);
-            }
-        }
-    }
-    closedir(b_dir);
-    
-    DIR *r_dir = opendir(restore_dir);
-    if (!r_dir) return; 
-
-    while ((dp = readdir(r_dir)) != NULL) {
-        if (strcmp(dp->d_name, ".") == 0 || strcmp(dp->d_name, "..") == 0) continue;
-
-        snprintf(backup_full, PATH_MAX, "%s/%s", backup_dir, dp->d_name); 
-        snprintf(restore_full, PATH_MAX, "%s/%s", restore_dir, dp->d_name); 
-
-        if (lstat(backup_full, &(struct stat){0}) == -1 && errno == ENOENT) {
-            
-            struct stat r_st;
-            if (lstat(restore_full, &r_st) == -1) continue;
-
-            if (S_ISDIR(r_st.st_mode)) {
-                 remove_directory_recursive(restore_full);
-            } else {
-                 unlink(restore_full);
-            }
-        }
-    }
-
-    closedir(r_dir);
-}
 
 void free_paths(char **paths, size_t count) {
     for (size_t i = 0; i < count; i++) {
@@ -382,8 +327,6 @@ void free_paths(char **paths, size_t count) {
     }
     free(paths);
 }
-
-
 
 void start_copy(char* source, char* target){
     char **file_paths = NULL;

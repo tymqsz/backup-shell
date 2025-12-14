@@ -14,9 +14,7 @@
 #include "fileproc.h"
 #include "synchro.h"
 #include "worker.h"
-
-#define ERR(source) \
-    (fprintf(stderr, "%s:%d\n", __FILE__, __LINE__), perror(source), kill(0, SIGKILL), exit(EXIT_FAILURE))
+#include "utils.h"
 
 
 volatile sig_atomic_t END = 0;
@@ -32,70 +30,6 @@ void handleInterruption(int sig){
     END = 1;
 }
 
-void setInfoHandler(void (*f)(int, siginfo_t*, void* ), int sigNo)
-{
-    struct sigaction act;
-    memset(&act, 0, sizeof(struct sigaction));
-    act.sa_sigaction = f;
-    act.sa_flags = SA_RESTART | SA_SIGINFO; 
-
-    if (-1 == sigaction(sigNo, &act, NULL))
-        ERR("sigaction");
-}
-
-void setHandler(void (*f)(int), int sigNo)
-{
-    struct sigaction act;
-    memset(&act, 0, sizeof(struct sigaction));
-    act.sa_handler = f;
-
-    if (-1 == sigaction(sigNo, &act, NULL))
-        ERR("sigaction");
-}
-
-
-char** split_line(char *line, int *count) {
-    if (line[0] != '\0' && line[strlen(line) - 1] == '\n') {
-        line[strlen(line) - 1] = '\0';
-    }
-
-    char *temp_line = strdup(line);
-    if (temp_line == NULL) return NULL;
-
-    char *token;
-    char *saveptr;
-    *count = 0;
-    
-    token = strtok_r(temp_line, " ", &saveptr);
-    while (token != NULL) {
-        if (token[0] != '\0') (*count)++;
-        token = strtok_r(NULL, " ", &saveptr);
-    }
-    
-    if (*count == 0) {
-        free(temp_line);
-        return NULL;
-    }
-
-    char **args = (char **)malloc((*count + 1) * sizeof(char *));
-    if (args == NULL) {
-        free(temp_line);
-        return NULL;
-    }
-
-    int i = 0;
-    token = strtok_r(line, " ", &saveptr);
-    while (token != NULL) {
-        if (token[0] != '\0') {
-            args[i++] = token;
-        }
-        token = strtok_r(NULL, " ", &saveptr);
-    }
-
-    args[*count] = NULL; 
-    free(temp_line);
-    return args;
-}
 
 int main(){
     sigset_t mask;
@@ -129,34 +63,27 @@ int main(){
         
         if(strcmp(cmd, "add") == 0){
             if(argc < 3){
-                printf("Usage: add <source> <dest1> [dest2] ...\n");
-                free(argv); // Don't forget to free
+                printf("Usage: add <source_dir> <target_dirs>\n");
+                free(argv);
                 continue;
             }
-
-            char* source = argv[1];
-
-            // Loop through every destination argument provided
+            
             for(int i = 2; i < argc; i++) {
-                char* current_dest = argv[i];
-
-                // Validate this specific source->dest pair
-                if(!prep_dirs(source, current_dest, workers)){
-                    printf("Skipping invalid target: %s\n", current_dest);
+                if(prep_dirs(argv[1], argv[i], workers) == -1){
                     continue;
                 }
                 
                 pid_t pid = fork();
                 if (pid < 0) {
-                    perror("fork");
+                    ERR("fork");
                 } 
                 else if(pid == 0){
                     setHandler(SIG_DFL, SIGTERM);
-                    child_work(source, current_dest);
+                    backup_work(argv[1], argv[i]);
                     exit(EXIT_SUCCESS);
                 }
                 
-                add_worker(source, current_dest, pid, workers);
+                add_worker(argv[1], argv[i], pid, workers);
             }
         }
         else if(strcmp(cmd, "end") == 0){            
@@ -170,7 +97,7 @@ int main(){
             break;
         }
         else if(strcmp(cmd, "restore") == 0){
-            mirror_restore_recursive(argv[2], argv[1]);
+            restore(argv[2], argv[1]);
         }
         else{
             printf("command unknown\n");
@@ -179,7 +106,6 @@ int main(){
         free(argv); 
     }
 
-    // Clean up
     kill(0, SIGTERM);
     return 0;
 }

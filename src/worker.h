@@ -15,20 +15,14 @@ typedef struct WorkerList{
 
 void add_worker(char* src, char* dst, pid_t pid, workerList* workers);
 
-void delete_workers_by_pid(pid_t pid, workerList* workers);
+int delete_workers_by_pid(pid_t pid, workerList* workers);
 
-void delete_workers_by_paths(char* src, char** dsts, workerList* workers);
+int delete_workers_by_paths(char* src, char** dsts, workerList* workers);
 
 void init_workerList(workerList** workers);
 
 void display_workerList(workerList* workers);
 
-void child_work(char* src, char* dst);
-
-int synchro_present(char* src, char* dst, workerList* workers);
-
-int dst_is_subdir(char* src, char* dst);
-
-int verify_src_dst(char* src, char* dst, workerList* workers);
+void backup_work(char* src, char* dst);
 
 #endif

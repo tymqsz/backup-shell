@@ -15,7 +15,9 @@ typedef struct WorkerList{
 
 void add_worker(char* src, char* dst, pid_t pid, workerList* workers);
 
-void delete_workers(pid_t pid, workerList* workers);
+void delete_workers_by_pid(pid_t pid, workerList* workers);
+
+void delete_workers_by_paths(char* src, char** dsts, workerList* workers);
 
 void init_workerList(workerList** workers);
 

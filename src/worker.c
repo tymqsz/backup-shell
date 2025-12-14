@@ -31,7 +31,7 @@ void add_worker(char* src, char* dst, pid_t pid, workerList* workers){
     workers->size++;
 }
 
-void delete_workers(pid_t pid, workerList* workers) {
+void delete_workers_by_pid(pid_t pid, workerList* workers) {
     if (workers == NULL || workers->size == 0) return;
 
     char* target_src = NULL;
@@ -76,6 +76,45 @@ void delete_workers(pid_t pid, workerList* workers) {
     workers->size = write_idx;
 
     free(target_src);
+}
+
+void delete_workers_by_paths(char* src, char** dsts, workerList* workers) {
+    if (workers == NULL || workers->size == 0 || src == NULL || dsts == NULL){
+        printf("lipton");
+        return;
+    } 
+
+    int write_idx = 0;
+
+    for (int i = 0; i < workers->size; i++) {
+        int should_delete = 0;
+
+        // 1. Check if source matches
+        if (strcmp(workers->list[i].source, src) == 0) {
+            
+            // 2. Check if the worker's destination exists in the provided dsts list
+            int j = 0;
+            while (dsts[j] != NULL) {
+                if (strcmp(workers->list[i].destination, dsts[j]) == 0) {
+                    should_delete = 1;
+                    break;
+                }
+                j++;
+            }
+        }
+
+        if (should_delete) {
+            free(workers->list[i].source);
+            free(workers->list[i].destination);
+
+        } else {
+            if (i != write_idx) {
+                workers->list[write_idx] = workers->list[i];
+            }
+            write_idx++;
+        }
+    }
+    workers->size = write_idx;
 }
 
 void init_workerList(workerList** workers){

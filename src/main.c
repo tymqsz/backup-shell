@@ -24,7 +24,7 @@ workerList* workers;
 void handleChildDeath(int sig, siginfo_t* info, void* v){
     //waitpid(info->si_pid, NULL, WNOHANG);
 
-    delete_workers(info->si_pid, workers);
+    delete_workers_by_pid(info->si_pid, workers);
 }
 
 void setHandler(void (*f)(int, siginfo_t*, void* ), int sigNo)
@@ -132,6 +132,9 @@ int main(){
                 add_worker(source, current_dest, pid, workers);
             }
         }
+        else if(strcmp(cmd, "end") == 0){            
+            delete_workers_by_paths(argv[1], argv+2, workers);
+        }
         else if(strcmp(cmd, "list") == 0){
             display_workerList(workers);
         }
@@ -143,7 +146,6 @@ int main(){
             printf("command unknown\n");
         }
         
-        // Free the memory allocated by split_line
         free(argv); 
     }
 

@@ -3,14 +3,16 @@
 
 #include <signal.h>
 #include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #define ERR(source) \
     (fprintf(stderr, "%s:%d\n", __FILE__, __LINE__), perror(source), kill(0, SIGKILL), exit(EXIT_FAILURE))
 
-void setInfoHandler(void (*f)(int, siginfo_t*, void* ), int sigNo);
+void setInfoHandler(void (*)(int, siginfo_t*, void* ), int);
 
-void setHandler(void (*f)(int), int sigNo);
+void setHandler(void (*)(int), int);
 
-char** split_line(char *line, int *count);
+char** split_line(char *, int *);
 
 #endif

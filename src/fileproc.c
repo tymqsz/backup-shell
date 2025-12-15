@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+#include "utils.h"
+
 #define MAX_PATH 1024
 #define MAX_BUF 1024
 
@@ -35,7 +37,7 @@ int remove_directory_recursive(const char *path) {
             snprintf(buf, len, "%s/%s", path, p->d_name);
             struct stat statbuf;
             
-            // Używamy lstat, żeby nie podążać za dowiązaniami symbolicznymi (chyba że są w katalogu do usunięcia)
+            /* ignore symlink destinations */
             if (lstat(buf, &statbuf) == -1) {
                 perror("lstat");
                 r = -1;
@@ -44,9 +46,9 @@ int remove_directory_recursive(const char *path) {
             }
 
             if (S_ISDIR(statbuf.st_mode)) {
-                r2 = remove_directory_recursive(buf); // REKURENCJA
+                r2 = remove_directory_recursive(buf);
             } else {
-                r2 = unlink(buf); // Usuwamy plik/link
+                r2 = unlink(buf);
             }
             
             if (r2) r = -1;
@@ -70,7 +72,7 @@ void add_path(char ***paths, size_t *count, size_t *capacity, const char *path) 
 
         char **new_paths = realloc(*paths, *capacity * sizeof(char*));
         if (new_paths == NULL) {
-            perror("realloc");
+            ERR("realloc");
             return;
         }
         *paths = new_paths;
@@ -78,7 +80,7 @@ void add_path(char ***paths, size_t *count, size_t *capacity, const char *path) 
 
     (*paths)[*count] = strdup(path);
     if ((*paths)[*count] == NULL) {
-        perror("strdup");
+        ERR("strdup");
         return;
     }
     
@@ -87,7 +89,7 @@ void add_path(char ***paths, size_t *count, size_t *capacity, const char *path) 
 
 /* find all files in a crt_path directory*/
 void find_files_recursive(const char *crt_path, char ***paths, size_t *count, size_t *capacity) {
-    char file[MAX_PATH];
+    char file[PATH_MAX];
     struct dirent *dp;
     DIR *dir = opendir(crt_path);
 
@@ -110,7 +112,7 @@ void find_files_recursive(const char *crt_path, char ***paths, size_t *count, si
 }
 
 int create_directories(const char *path) {
-    char temp_path[MAX_PATH];
+    char temp_path[PATH_MAX];
     char *p = NULL;
     size_t len;
 
@@ -130,6 +132,8 @@ int create_directories(const char *path) {
             if (mkdir(temp_path, 0777) && errno != EEXIST) {
                 return -1;
             }
+
+            /* restore previus path string*/
             *p = '/';
         }
     }
@@ -176,7 +180,7 @@ int copy_single_file(const char *src, const char *dest, const char *base_src, co
     struct stat st;
     
     if (lstat(src, &st) == -1) {
-        perror("lstat error");
+        ERR("lstat error");
         return -1;
     }
     if (S_ISLNK(st.st_mode)) {
@@ -186,7 +190,7 @@ int copy_single_file(const char *src, const char *dest, const char *base_src, co
 
         len = readlink(src, link_target, sizeof(link_target) - 1);
         if (len == -1) {
-            perror("readlink error");
+            ERR("readlink error");
             return -1;
         }
         link_target[len] = '\0';
@@ -208,11 +212,8 @@ int copy_single_file(const char *src, const char *dest, const char *base_src, co
             strcpy(final_target, link_target);
         }
 
-        
-        //unlink(dest);
-
         if (symlink(final_target, dest) == -1) {
-            perror("symlink creation failed");
+            ERR("symlink creation failed");
             return -1;
         }
         
@@ -228,16 +229,16 @@ int copy_single_file(const char *src, const char *dest, const char *base_src, co
     ssize_t bytes_read, bytes_written;
     int result = 0;
 
-    src_fd = open(src, O_RDONLY);
+    src_fd = TEMP_FAILURE_RETRY(open(src, O_RDONLY));
     if (src_fd < 0) {
-        perror("open src");
+        ERR("open src");
         return -1;
     }
 
-    dst_fd = open(dest, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    dst_fd = TEMP_FAILURE_RETRY(open(dest, O_WRONLY | O_CREAT | O_TRUNC, 0777));
     if (dst_fd < 0) {
-        perror("open dest");
-        close(src_fd);
+        ERR("open dest");
+        TEMP_FAILURE_RETRY(close(src_fd));
         return -1;
     }
 
@@ -245,24 +246,24 @@ int copy_single_file(const char *src, const char *dest, const char *base_src, co
         bytes_written = bulk_write(dst_fd, buffer, bytes_read);
         
         if (bytes_written != bytes_read) {
-            perror("bulk_write");
+            ERR("bulk_write");
             result = -1;
             break; 
         }
     }
 
     if (bytes_read < 0) {
-        perror("bulk_read");
+        ERR("bulk_read");
         result = -1;
     }
 
-    if (close(src_fd) < 0) {
-        perror("close src");
+    if (TEMP_FAILURE_RETRY(close(src_fd)) < 0) {
+        ERR("close src");
         result = -1;
     }
     
-    if (close(dst_fd) < 0) {
-        perror("close dst");
+    if (TEMP_FAILURE_RETRY(close(dst_fd)) < 0) {
+        ERR("close dst");
         result = -1;
     }
     return 0;
@@ -274,15 +275,11 @@ int copy_files(char **file_paths, size_t count, const char *base_path, const cha
     for (size_t i = 0; i < count; i++) {
         const char *src_path = file_paths[i];
         const char *rel_path;
-        char dest_path[MAX_BUF];
-        char dest_dir[MAX_BUF];
+        char dest_path[PATH_MAX];
+        char dest_dir[PATH_MAX];
 
         size_t base_len = strlen(base_path);
         
-        /*if (strncmp(src_path, base_path, base_len) != 0) {
-            continue;
-        }*/
-
         rel_path = src_path + base_len;
         if (*rel_path == '/') {
             rel_path++;
@@ -292,13 +289,13 @@ int copy_files(char **file_paths, size_t count, const char *base_path, const cha
 
 
         if (stat(src_path, &st) == -1) {
-            perror("stat");
+            ERR("stat");
             continue;
         }
 
         if (S_ISDIR(st.st_mode)) {
             if (create_directories(dest_path) != 0) {
-                fprintf(stderr, "Failed to create directory %s\n", dest_path);
+                ERR("create_directories");
             }
         } else {
             /* if dest path points to file -> extract parent dir*/
@@ -308,11 +305,12 @@ int copy_files(char **file_paths, size_t count, const char *base_path, const cha
                 strncpy(dest_dir, dest_path, dir_len);
                 dest_dir[dir_len] = '\0';
                 
+                /* create parent dirs */
                 create_directories(dest_dir);
             }
 
             if (copy_single_file(src_path, dest_path, base_path, target_dir) != 0) {
-                fprintf(stderr, "Failed to copy file %s\n", src_path);
+                ERR("copy_single_file");
             }
         }
     }

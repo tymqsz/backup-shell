@@ -1,14 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <dirent.h>
-#include <sys/stat.h>
-#include <errno.h>
-#include <sys/inotify.h>
 #include <unistd.h>
-#include <limits.h>
 #include <signal.h>
-#include <fcntl.h>
+#include <sys/types.h>
 
 #include "worker.h"
 #include "synchro.h"
@@ -35,8 +30,8 @@ void add_worker(char* src, char* dst, pid_t pid, workerList* workers){
     workers->size++;
 }
 
-/*  delete a worker with a given pid
- *  returns: 0 - success, -1 failure
+/* delete a worker with a given pid
+ * returns: 0 - success, -1 failure
  */
 int delete_workers_by_pid(pid_t pid, workerList* workers) {
    
@@ -48,14 +43,18 @@ int delete_workers_by_pid(pid_t pid, workerList* workers) {
     while(i < worker_cnt){
         if(workers->list[i].pid == pid){
             worker_idx = i;
+            
+            // Free dynamically allocated path strings before deletion
+            free(workers->list[i].source);
+            free(workers->list[i].destination);
+            
             break;
         }
         i++;
     }
 
-    /* worker with this pid not found*/
+    /* worker with this pid not found (deletion by end)*/
     if(worker_idx == -1){
-        printf("here");
         return -1;
     }
 
@@ -71,8 +70,8 @@ int delete_workers_by_pid(pid_t pid, workerList* workers) {
     return 0;
 }
 
-/*  delete a worker with a given src and one of dsts
- *  returns: 0 - success, -1 failure
+/* delete a worker with a given src and one of dsts
+ * returns: 0 - success, -1 failure
  */
 int delete_workers_by_paths(char* src, char** dsts, workerList* workers) {
     if (workers == NULL || workers->size == 0 || src == NULL || dsts == NULL){
@@ -120,6 +119,8 @@ void init_workerList(workerList** workers){
     (*workers)->capacity = 16;
     (*workers)->size = 0;
     (*workers)->list = malloc(sizeof(worker) * (*workers)->capacity);
+    if ((*workers)->list == NULL)
+        ERR("malloc");
 }
 
 

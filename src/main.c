@@ -1,14 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <dirent.h>
-#include <sys/stat.h>
-#include <errno.h>
-#include <sys/inotify.h>
 #include <unistd.h>
 #include <limits.h>
 #include <signal.h>
-#include <fcntl.h>
 #include <sys/wait.h>
 
 #include "fileproc.h"

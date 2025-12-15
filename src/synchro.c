@@ -14,7 +14,6 @@
 
 #define EVENT_SIZE  (sizeof(struct inotify_event))
 #define BUF_LEN     (1024 * (EVENT_SIZE + 16))*4
-#define MAX_PATH 1024
 
 typedef struct WatchMap {
     int wd;
@@ -48,19 +47,14 @@ void add_watches_recursive(int fd, const char *path) {
     int wd = inotify_add_watch(fd, path, IN_CREATE | IN_MOVED_TO |
                                          IN_CLOSE_WRITE | IN_DELETE |
                                          IN_MOVED_FROM | IN_DELETE_SELF);
-    
-    //if (wd == -1) {
-    //   
-    //  
-    //} else {
     add_watch_mapping(wd, path);
-    //}
+
 
     DIR *dir = opendir(path);
     if (!dir) return;
 
     struct dirent *dp;
-    char path_buffer[MAX_PATH];
+    char path_buffer[PATH_MAX];
     while ((dp = readdir(dir)) != NULL) {
         if (strcmp(dp->d_name, ".") != 0 && strcmp(dp->d_name, "..") != 0) {
             if (dp->d_type == DT_DIR) {
@@ -73,12 +67,12 @@ void add_watches_recursive(int fd, const char *path) {
 }
 
 /* copy all changes in source_dir to target_dir */
-void synchronize(const char *source_dir, const char *target_dir) {
+void synchronize(const char *source_base_dir, const char *destination_base_dir) {
     int fd = inotify_init();
     if (fd < 0)
         ERR("inotify_init");
 
-    add_watches_recursive(fd, source_dir);
+    add_watches_recursive(fd, source_base_dir);
 
     char buffer[BUF_LEN];
     int length, i = 0;
@@ -94,62 +88,63 @@ void synchronize(const char *source_dir, const char *target_dir) {
         while (i < length) {
             struct inotify_event *event = (struct inotify_event *)&buffer[i];
             if(event->len == 0){
-                const char *src_dir_path = get_path_from_wd(event->wd);
+                const char *event_source = get_path_from_wd(event->wd);
                 
                 /* check if source_dir present */
-                if(strcmp(src_dir_path, source_dir)==0 && (event->mask & IN_DELETE_SELF)){
+                if(strcmp(event_source, source_base_dir)==0 && (event->mask & IN_DELETE_SELF)){
                     source_deleted = 1;
                     break;
                 }
             }
 
-            /* file modified */
+            /* file/dir modified */
             if (event->len) {
-                const char *src_dir_path = get_path_from_wd(event->wd);
+                const char *event_source = get_path_from_wd(event->wd);
                 
-                if (src_dir_path) {
-                    char full_src_path[MAX_PATH];
-                    char full_tgt_path[MAX_PATH];
+                if (event_source) {
+                    char full_src_path[PATH_MAX];
+                    char full_dst_path[PATH_MAX];
                     
-                    // Konstrukcja pełnej ścieżki źródłowej
-                    snprintf(full_src_path, sizeof(full_src_path), "%s/%s", src_dir_path, event->name);
+                    /* modifed path construction */
+                    snprintf(full_src_path, sizeof(full_src_path), "%s/%s", event_source, event->name);
 
-                    // Obliczenie ścieżki względnej
-                    const char *rel_path = src_dir_path + strlen(source_dir);
+                    /* relative path construction */
+                    const char *rel_path = event_source + strlen(source_base_dir);
                     if (*rel_path == '/') rel_path++;
 
-                    // Sprawdzamy, czy jesteśmy w podfolderze, czy w głównym katalogu
                     if (strlen(rel_path) > 0) {
-                        // Jesteśmy w podkatalogu: target + / + rel_path + / + name
-                        snprintf(full_tgt_path, sizeof(full_tgt_path), "%s/%s/%s", target_dir, rel_path, event->name);
+                        /* subdir */
+                        snprintf(full_dst_path, sizeof(full_dst_path), "%s/%s/%s", destination_base_dir, rel_path, event->name);
                     } else {
-                        // Jesteśmy w katalogu głównym: target + / + name (bez rel_path pośrodku)
-                        snprintf(full_tgt_path, sizeof(full_tgt_path), "%s/%s", target_dir, event->name);
+                        /* main src dir*/
+                        snprintf(full_dst_path, sizeof(full_dst_path), "%s/%s", destination_base_dir, event->name);
                     }
-
+                    
+                    
                     if (event->mask & IN_ISDIR) {
+                        /* modified path -> dir*/
                         if (event->mask & (IN_CREATE | IN_MOVED_TO)) {
-                            mkdir(full_tgt_path, 0777); 
+                            mkdir(full_dst_path, 0777); /* mkdirs ? */
                             add_watches_recursive(fd, full_src_path);
                         }
                         else if (event->mask & (IN_DELETE | IN_MOVED_FROM)) {
-                            remove_directory_recursive(full_tgt_path);
+                            remove_directory_recursive(full_dst_path);
                         }
                     } else {
+                        /* modified path -> file*/
                         if (event->mask & (IN_MOVED_TO | IN_CLOSE_WRITE)) {
-                            
-                            char dest_dir_copy[4096];
-                            strcpy(dest_dir_copy, full_tgt_path);
-                            char *last_slash = strrchr(dest_dir_copy, '/');
+                            char dst_cp[PATH_MAX];
+                            strcpy(dst_cp, full_dst_path);
+                            char *last_slash = strrchr(dst_cp, '/');
                             if (last_slash) {
                                 *last_slash = '\0';
-                                create_directories(dest_dir_copy);
+                                create_directories(dst_cp);
                             }
 
-                            copy_single_file(full_src_path, full_tgt_path, source_dir, target_dir);
+                            copy_single_file(full_src_path, full_dst_path, source_base_dir, destination_base_dir);
                         }
                         else if (event->mask & (IN_DELETE | IN_MOVED_FROM)) {
-                            unlink(full_tgt_path);
+                            unlink(full_dst_path);
                         }
                     }
                 }

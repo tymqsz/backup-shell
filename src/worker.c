@@ -35,46 +35,39 @@ void add_worker(char* src, char* dst, pid_t pid, workerList* workers){
     workers->size++;
 }
 
-/*  delete all workers with same source as worker with process id = pid 
+/*  delete a worker with a given pid
  *  returns: 0 - success, -1 failure
  */
 int delete_workers_by_pid(pid_t pid, workerList* workers) {
+   
     if (workers == NULL || workers->size == 0) 
         return -1;
 
-    char* target_src = NULL;
-    for (int i = 0; i < workers->size; i++) {
-        if (workers->list[i].pid == pid) {
-            if (workers->list[i].source != NULL) {
-                target_src = strdup(workers->list[i].source);
-            }
+    int worker_idx = -1;
+    int i = 0, worker_cnt = workers->size;
+    while(i < worker_cnt){
+        if(workers->list[i].pid == pid){
+            worker_idx = i;
             break;
         }
+        i++;
     }
 
-    if (target_src == NULL) {
+    /* worker with this pid not found*/
+    if(worker_idx == -1){
+        printf("here");
         return -1;
     }
 
-    int write_idx = 0; /* index to overwrite */
-    for (int i = 0; i < workers->size; i++) {
-        
-        if (strcmp(workers->list[i].source, target_src) == 0) {
-            free(workers->list[i].source);
-            if (workers->list[i].destination != NULL) {
-                free(workers->list[i].destination);
-            }
-
-        } else {
-            if (i != write_idx) {
-                workers->list[write_idx] = workers->list[i];
-            }
-            write_idx++;
+    /* overwrite the worker*/
+    if(worker_idx != worker_cnt -1){
+        if(memmove(workers->list+worker_idx, workers->list+worker_idx+1, (worker_cnt-worker_idx-1)* sizeof(worker)) == NULL){
+            ERR("memmove");
         }
     }
-    workers->size = write_idx;
 
-    free(target_src);
+    
+    workers->size--;
     return 0;
 }
 
@@ -132,7 +125,7 @@ void init_workerList(workerList** workers){
 
 void display_workerList(workerList* workers){
     for(int i = 0; i < workers->size; i++){
-        printf("backup %d: %s -> %s \n", i,
+        printf("[%d], backup %d: %s -> %s \n", i, workers->list[i].pid,
             (workers->list[i]).source, (workers->list[i]).destination);
     }
 }
@@ -142,7 +135,4 @@ void backup_work(char* src, char* dst){
     setup_target_dir(dst);
     start_copy(src, dst);
     synchronize(src, dst);
-
-    /* notify main process of end of life */
-    kill(getppid(), SIGUSR1);
 }

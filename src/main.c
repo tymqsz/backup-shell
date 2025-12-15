@@ -19,38 +19,45 @@
 
 volatile sig_atomic_t END = 0;
 
-workerList* workers;
-
-void handleChildDeath(int sig, siginfo_t* info, void* v){
-    delete_workers_by_pid(info->si_pid, workers);
-}
-
 void handleInterruption(int sig){
     /* end of app */
     END = 1;
 }
 
 
+void collectDeadWorkers(workerList* workers){
+    pid_t pid;
+    int worker_cnt = workers->size, i = 0;
+
+    while(i < worker_cnt){
+        pid  = waitpid(-1, NULL, WNOHANG);
+        if(pid <= 0)
+            return;
+        
+        delete_workers_by_pid(pid, workers);
+        i++;
+    }
+}
+
 int main(){
     sigset_t mask;
-
     sigfillset(&mask); 
     sigdelset(&mask, SIGINT);
     sigdelset(&mask, SIGTERM);
-    sigdelset(&mask, SIGUSR1);
     sigprocmask(SIG_SETMASK, &mask, NULL);
 
     setHandler(handleInterruption, SIGINT);
     setHandler(handleInterruption, SIGTERM);
-    setInfoHandler(handleChildDeath, SIGUSR1);
-    char line[2 * PATH_MAX + 50]; 
-
+    
+    workerList* workers;
     init_workerList(&workers);
 
+
+    char line[2 * PATH_MAX + 50];
     while (!END) {
-        printf("SyncShell> ");
+        printf("command: ");
         if (fgets(line, sizeof(line), stdin) == NULL) {
-            break;
+            continue; /* ?? */
         }
         line[strcspn(line, "\n")] = 0;
 
@@ -61,6 +68,9 @@ int main(){
 
         char* cmd = argv[0];
         
+        /* check if any of workers died */
+        collectDeadWorkers(workers);
+
         if(strcmp(cmd, "add") == 0){
             if(argc < 3){
                 printf("Usage: add <source_dir> <target_dirs>\n");

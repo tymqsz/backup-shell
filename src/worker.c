@@ -1,3 +1,7 @@
+#define _GNU_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#define _XOPEN_SOURCE 700
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -111,6 +115,16 @@ int delete_workers_by_paths(char* src, char** dsts, workerList* workers) {
     workers->size = write_idx;
 
     return 0;
+}
+
+void delete_all_workers(workerList* workers){
+    for(int i = 0; i < workers->size; i++){
+        free(workers->list[i].source);
+        free(workers->list[i].destination);
+    }
+
+    free(workers->list);
+    free(workers);
 }
 
 /* initialize workers */

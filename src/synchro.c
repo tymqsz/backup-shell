@@ -1,3 +1,7 @@
+#define _GNU_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#define _XOPEN_SOURCE 700
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -8,9 +12,12 @@
 #include <unistd.h>
 #include <limits.h>
 
+
+#include "utils.h"
 #include "fileproc.h"
 #include "worker.h"
 #include "utils.h"
+
 
 #define EVENT_SIZE  (sizeof(struct inotify_event))
 #define BUF_LEN     (1024 * (EVENT_SIZE + 16))*4

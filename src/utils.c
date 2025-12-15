@@ -1,3 +1,7 @@
+#define _GNU_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#define _XOPEN_SOURCE 700
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6,6 +10,10 @@
 #include <unistd.h>
 
 #include "utils.h"
+#include "fileproc.h"
+#include "worker.h"
+#include "utils.h"
+
 
 
 void setInfoHandler(void (*f)(int, siginfo_t*, void* ), int sigNo)

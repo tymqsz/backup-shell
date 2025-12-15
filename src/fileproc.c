@@ -1,4 +1,6 @@
 #define _GNU_SOURCE
+#define _POSIX_C_SOURCE 200809L
+
 #include <fcntl.h>
 #include <string.h>
 #include <dirent.h>
@@ -8,6 +10,9 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+#include "utils.h"
+#include "fileproc.h"
+#include "worker.h"
 #include "utils.h"
 
 #define MAX_PATH 1024
@@ -227,7 +232,6 @@ int copy_single_file(const char *src, const char *dest, const char *base_src, co
     int src_fd, dst_fd;
     char buffer[MAX_BUF];
     ssize_t bytes_read, bytes_written;
-    int result = 0;
 
     src_fd = TEMP_FAILURE_RETRY(open(src, O_RDONLY));
     if (src_fd < 0) {
@@ -247,24 +251,23 @@ int copy_single_file(const char *src, const char *dest, const char *base_src, co
         
         if (bytes_written != bytes_read) {
             ERR("bulk_write");
-            result = -1;
             break; 
         }
     }
 
     if (bytes_read < 0) {
         ERR("bulk_read");
-        result = -1;
+        return -1;
     }
 
     if (TEMP_FAILURE_RETRY(close(src_fd)) < 0) {
         ERR("close src");
-        result = -1;
+        return -1;
     }
     
     if (TEMP_FAILURE_RETRY(close(dst_fd)) < 0) {
         ERR("close dst");
-        result = -1;
+        return -1;
     }
     return 0;
 }

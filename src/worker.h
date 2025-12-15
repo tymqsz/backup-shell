@@ -3,7 +3,9 @@
 
 #include <sys/types.h>
 #include <stddef.h>
-
+#include "utils.h"
+#include "fileproc.h"
+#include "utils.h"
 typedef struct Worker{
     char* source;
     char* destination;
@@ -17,6 +19,8 @@ typedef struct WorkerList{
 } workerList;
 
 void add_worker(char*, char*, pid_t, workerList*);
+
+void delete_all_workers(workerList*);
 
 int delete_workers_by_pid(pid_t, workerList*);
 

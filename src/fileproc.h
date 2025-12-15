@@ -1,6 +1,10 @@
 #ifndef FP_H
 #define FP_H
 
+#include "utils.h"
+#include "worker.h"
+#include "utils.h"
+
 void add_path(char ***, size_t *, size_t *, const char *);
 
 void free_paths(char**, size_t);

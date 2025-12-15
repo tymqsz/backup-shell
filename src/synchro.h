@@ -1,7 +1,10 @@
 #ifndef SYNC_H
 #define SYNC_H
 
+#include "utils.h"
+#include "fileproc.h"
 #include "worker.h"
+#include "utils.h"
 
 typedef struct WatchMap {
     int wd;

@@ -1,3 +1,6 @@
+#define _GNU_SOURCE
+#define _POSIX_C_SOURCE 200809L
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6,10 +9,12 @@
 #include <signal.h>
 #include <sys/wait.h>
 
+
+#include "utils.h"
 #include "fileproc.h"
-#include "synchro.h"
 #include "worker.h"
 #include "utils.h"
+#include "synchro.h"
 
 
 volatile sig_atomic_t END = 0;
@@ -52,7 +57,7 @@ int main(){
     while (!END) {
         printf("command: ");
         if (fgets(line, sizeof(line), stdin) == NULL) {
-            continue; /* ?? */
+            break;
         }
         line[strcspn(line, "\n")] = 0;
 
@@ -110,7 +115,8 @@ int main(){
         
         free(argv); 
     }
-
+    
+    delete_all_workers(workers);
     kill(0, SIGTERM);
     return 0;
 }

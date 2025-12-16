@@ -199,6 +199,35 @@ int backup_present(char *src, char *dst, workerList *workers)
     return 0;
 }
 
+int is_subdir(const char *child_path, const char *parent_path) {
+    char *abs_child = realpath(child_path, NULL);
+    char *abs_parent = realpath(parent_path, NULL);
+    
+    int result = 0;
+
+    if (abs_child && abs_parent) {
+        size_t len_parent = strlen(abs_parent);
+        size_t len_child = strlen(abs_child);
+
+        if (len_parent <= len_child) {
+            if (strncmp(abs_parent, abs_child, len_parent) == 0) {
+                if (len_parent == 1 && abs_parent[0] == '/') {
+                    /* parent == root */
+                    result = 1;
+                } else if (abs_child[len_parent] == '/' || abs_child[len_parent] == '\0') {
+                    /* exclude /a/abc /a/ab */
+                    result = 1;
+                }
+            }
+        }
+    }
+
+    free(abs_child);
+    free(abs_parent);
+
+    return result;
+}
+
 /*  verify presence of srcdir and emptiness of dst
  *   and make sure backup is not present
  *   returns: 0 on succes otherwise -1
@@ -208,7 +237,7 @@ int prep_dirs(char *src, char *dst, workerList *workers)
     /* check src exists */
     struct stat src_stat;
     if (stat(src, &src_stat) < 0 || !S_ISDIR(src_stat.st_mode) || backup_present(src, dst, workers) ||
-        strstr(dst, src) != NULL)
+        is_subdir(dst, src))
         return -1;
 
     /* check dst doesnt exist */
@@ -291,7 +320,7 @@ void restore(const char *restore_dir, const char *backup_dir)
         {
             struct stat r_st;
             /* copy if backup is modified later */
-            if (lstat(restore_full, &r_st) == -1)
+            if (lstat(restore_full, &r_st) == -1 || b_st.st_mtime > b_st.st_ctime)
             {
                 copy_single_file(backup_full, restore_full, backup_dir, restore_dir);
             }

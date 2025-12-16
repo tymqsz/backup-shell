@@ -15,6 +15,7 @@
 
 volatile sig_atomic_t END = 0;
 
+
 void handleInterruption(int sig)
 {
     /* end of app */

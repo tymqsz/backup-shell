@@ -1,32 +1,31 @@
 #define _GNU_SOURCE
-#define _POSIX_C_SOURCE 200809L
-#define _XOPEN_SOURCE 700
 
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <signal.h>
 #include <sys/types.h>
+#include <unistd.h>
 
-#include "worker.h"
-#include "synchro.h"
 #include "fileproc.h"
+#include "synchro.h"
 #include "utils.h"
-
+#include "worker.h"
 
 /* add worker to workers provided as an argument */
-void add_worker(char* src, char* dst, pid_t pid, workerList* workers){
+void add_worker(char *src, char *dst, pid_t pid, workerList *workers)
+{
     /* resize if necessary */
-    if(workers->size >= workers->capacity){
-        worker* new_list = realloc(workers->list, (workers->capacity+16)*sizeof(worker));
-        if(new_list == NULL)
+    if (workers->size >= workers->capacity)
+    {
+        worker *new_list = realloc(workers->list, (workers->capacity + 16) * sizeof(worker));
+        if (new_list == NULL)
             ERR("realloc");
-        
+
         workers->list = new_list;
         workers->capacity += 16;
     }
-    
+
     workers->list[workers->size].source = strdup(src);
     workers->list[workers->size].destination = strdup(dst);
     workers->list[workers->size].pid = pid;
@@ -37,39 +36,44 @@ void add_worker(char* src, char* dst, pid_t pid, workerList* workers){
 /* delete a worker with a given pid
  * returns: 0 - success, -1 failure
  */
-int delete_workers_by_pid(pid_t pid, workerList* workers) {
-   
-    if (workers == NULL || workers->size == 0) 
+int delete_workers_by_pid(pid_t pid, workerList *workers)
+{
+    if (workers == NULL || workers->size == 0)
         return -1;
 
     int worker_idx = -1;
     int i = 0, worker_cnt = workers->size;
-    while(i < worker_cnt){
-        if(workers->list[i].pid == pid){
+    while (i < worker_cnt)
+    {
+        if (workers->list[i].pid == pid)
+        {
             worker_idx = i;
-            
+
             // Free dynamically allocated path strings before deletion
             free(workers->list[i].source);
             free(workers->list[i].destination);
-            
+
             break;
         }
         i++;
     }
 
     /* worker with this pid not found (deletion by end)*/
-    if(worker_idx == -1){
+    if (worker_idx == -1)
+    {
         return -1;
     }
 
     /* overwrite the worker*/
-    if(worker_idx != worker_cnt -1){
-        if(memmove(workers->list+worker_idx, workers->list+worker_idx+1, (worker_cnt-worker_idx-1)* sizeof(worker)) == NULL){
+    if (worker_idx != worker_cnt - 1)
+    {
+        if (memmove(workers->list + worker_idx, workers->list + worker_idx + 1,
+                    (worker_cnt - worker_idx - 1) * sizeof(worker)) == NULL)
+        {
             ERR("memmove");
         }
     }
 
-    
     workers->size--;
     return 0;
 }
@@ -77,21 +81,27 @@ int delete_workers_by_pid(pid_t pid, workerList* workers) {
 /* delete a worker with a given src and one of dsts
  * returns: 0 - success, -1 failure
  */
-int delete_workers_by_paths(char* src, char** dsts, workerList* workers) {
-    if (workers == NULL || workers->size == 0 || src == NULL || dsts == NULL){
+int delete_workers_by_paths(char *src, char **dsts, workerList *workers)
+{
+    if (workers == NULL || workers->size == 0 || src == NULL || dsts == NULL)
+    {
         return -1;
-    } 
+    }
 
     int write_idx = 0;
-    for (int i = 0; i < workers->size; i++) {
+    int result = 0;
+    for (int i = 0; i < workers->size; i++)
+    {
         int should_delete = 0;
 
-        if (strcmp(workers->list[i].source, src) == 0) {
-
+        if (strcmp(workers->list[i].source, src) == 0)
+        {
             /* check if one of destination matches */
             int j = 0;
-            while (dsts[j] != NULL) {
-                if (strcmp(workers->list[i].destination, dsts[j]) == 0) {
+            while (dsts[j] != NULL)
+            {
+                if (strcmp(workers->list[i].destination, dsts[j]) == 0)
+                {
                     should_delete = 1;
                     break;
                 }
@@ -99,14 +109,19 @@ int delete_workers_by_paths(char* src, char** dsts, workerList* workers) {
             }
         }
 
-        if (should_delete) {
+        if (should_delete)
+        {
+            result = 1;
+
             kill(workers->list[i].pid, SIGTERM);
             free(workers->list[i].source);
             free(workers->list[i].destination);
-
-        } else {
+        }
+        else
+        {
             /* overwrite killed workers */
-            if (i != write_idx) {
+            if (i != write_idx)
+            {
                 workers->list[write_idx] = workers->list[i];
             }
             write_idx++;
@@ -114,11 +129,13 @@ int delete_workers_by_paths(char* src, char** dsts, workerList* workers) {
     }
     workers->size = write_idx;
 
-    return 0;
+    return result;
 }
 
-void delete_all_workers(workerList* workers){
-    for(int i = 0; i < workers->size; i++){
+void delete_all_workers(workerList *workers)
+{
+    for (int i = 0; i < workers->size; i++)
+    {
         free(workers->list[i].source);
         free(workers->list[i].destination);
     }
@@ -128,7 +145,8 @@ void delete_all_workers(workerList* workers){
 }
 
 /* initialize workers */
-void init_workerList(workerList** workers){
+void init_workerList(workerList **workers)
+{
     *workers = malloc(sizeof(workerList));
     (*workers)->capacity = 16;
     (*workers)->size = 0;
@@ -137,17 +155,23 @@ void init_workerList(workerList** workers){
         ERR("malloc");
 }
 
+void display_workerList(workerList *workers)
+{
+    if (workers->size == 0)
+    {
+        printf("no backup in progress\n");
+    }
 
-void display_workerList(workerList* workers){
-    for(int i = 0; i < workers->size; i++){
-        printf("[%d], backup %d: %s -> %s \n", i, workers->list[i].pid,
-            (workers->list[i]).source, (workers->list[i]).destination);
+    for (int i = 0; i < workers->size; i++)
+    {
+        printf("backup no.%d: %s -> %s \n", i, (workers->list[i]).source, (workers->list[i]).destination);
     }
 }
 
 /* start backup from src to dst path */
-void backup_work(char* src, char* dst){
-    setup_target_dir(dst);
+void backup_work(char *src, char *dst)
+{
+    //setup_target_dir(dst);
     start_copy(src, dst);
     synchronize(src, dst);
 }

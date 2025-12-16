@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "fileproc.h"
@@ -50,6 +51,7 @@ int main()
 
     workerList *workers;
     init_workerList(&workers);
+    BackupList *b_list = initBackupList();
 
     char line[10 * PATH_MAX];
     while (!END)
@@ -73,6 +75,7 @@ int main()
 
         if (strcmp(cmd, "add") == 0)
         {
+            time_t t = time(NULL);
             if (argc < 3)
             {
                 printf("usage: add <source path> <target paths>\n");
@@ -100,6 +103,7 @@ int main()
                     exit(EXIT_SUCCESS);
                 }
 
+                insertBackupNode(b_list, argv[i], t);
                 add_worker(argv[1], argv[i], pid, workers);
             }
         }
@@ -134,7 +138,8 @@ int main()
                 free(argv);
                 continue;
             }
-            restore(argv[1], argv[2]);
+            time_t t = getTimeFromDst(b_list, argv[2]);
+            restore(argv[1], argv[2], t);
         }
         else
         {
@@ -144,6 +149,7 @@ int main()
         free(argv);
     }
 
+    freeBackupList(b_list);
     delete_all_workers(workers);
     kill(0, SIGTERM);
     return 0;

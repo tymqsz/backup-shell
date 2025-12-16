@@ -1,18 +1,21 @@
 #ifndef SYNC_H
 #define SYNC_H
 
+#include "fileproc.h"
+#include "utils.h"
 #include "worker.h"
 
-typedef struct WatchMap {
+typedef struct WatchMap
+{
     int wd;
     char *path;
     struct WatchMap *next;
 } WatchMap;
 
-void synchronize(const char *source_dir, const char *target_dir);
+void synchronize(const char *, const char *);
 
-void restore(const char *backup_dir, const char *restore_dir);
+void restore(const char *, const char *);
 
-int prep_dirs(char* src, char* dst, workerList* workers);
+int prep_dirs(char *, char *, workerList *);
 
 #endif

@@ -1,33 +1,25 @@
 #ifndef FP_H
-
-#include <string.h>
-#include <dirent.h>
-#include <sys/stat.h>
-#include <errno.h>
-#include <stdio.h>
-#include <stdlib.h>
-
 #define FP_H
 
+#include "utils.h"
+#include "worker.h"
 
-void add_path(char ***paths, size_t *count, size_t *capacity, const char *path);
+void add_path(char ***, size_t *, size_t *, const char *);
 
-void free_paths(char**, size_t);
+void free_paths(char **, size_t);
 
-int copy_single_file(const char *src, const char *dest, const char *base_src, const char *base_dest);
+int copy_single_file(const char *, const char *, const char *, const char *);
 
-int copy_files(char **file_paths, size_t count, const char *base_path, const char *target_dir);
+int copy_files(char **, size_t, const char *, const char *);
 
-void find_files_recursive(const char *basePath, char ***paths, size_t *count, size_t *capacity);
+void find_files_recursive(const char *, char ***, size_t *, size_t *);
 
+int create_directories(const char *);
 
-int create_directories(const char *path);
+int remove_directory_recursive(const char *);
 
-int remove_directory_recursive(const char *path);
+int setup_target_dir(const char *);
 
-int setup_target_dir(const char *t_path);
+void start_copy(char *, char *);
 
-void start_copy(char* source, char* target);
-
-void mirror_restore_recursive(const char *backup_dir, const char *restore_dir);
 #endif

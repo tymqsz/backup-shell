@@ -176,6 +176,17 @@ void synchronize(const char *source_base_dir, const char *destination_base_dir)
                         }
                         else if (event->mask & (IN_DELETE | IN_MOVED_FROM))
                         {
+                            /* wait 20ms and check if source exists */
+                            struct timespec req;
+                            req.tv_sec = 0;
+                            req.tv_nsec = 20 * 1000000;
+                            nanosleep(&req, NULL);
+                            if (access(source_base_dir, F_OK) == -1)
+                            {
+                                close(fd);
+                                return;
+                            }
+
                             unlink(full_dst_path);
                         }
                     }

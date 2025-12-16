@@ -171,7 +171,7 @@ void display_workerList(workerList *workers)
 /* start backup from src to dst path */
 void backup_work(char *src, char *dst)
 {
-    //setup_target_dir(dst);
+    // setup_target_dir(dst);
     start_copy(src, dst);
     synchronize(src, dst);
 }

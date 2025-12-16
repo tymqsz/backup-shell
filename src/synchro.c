@@ -199,22 +199,29 @@ int backup_present(char *src, char *dst, workerList *workers)
     return 0;
 }
 
-int is_subdir(const char *child_path, const char *parent_path) {
+int is_subdir(const char *child_path, const char *parent_path)
+{
     char *abs_child = realpath(child_path, NULL);
     char *abs_parent = realpath(parent_path, NULL);
-    
+
     int result = 0;
 
-    if (abs_child && abs_parent) {
+    if (abs_child && abs_parent)
+    {
         size_t len_parent = strlen(abs_parent);
         size_t len_child = strlen(abs_child);
 
-        if (len_parent <= len_child) {
-            if (strncmp(abs_parent, abs_child, len_parent) == 0) {
-                if (len_parent == 1 && abs_parent[0] == '/') {
+        if (len_parent <= len_child)
+        {
+            if (strncmp(abs_parent, abs_child, len_parent) == 0)
+            {
+                if (len_parent == 1 && abs_parent[0] == '/')
+                {
                     /* parent == root */
                     result = 1;
-                } else if (abs_child[len_parent] == '/' || abs_child[len_parent] == '\0') {
+                }
+                else if (abs_child[len_parent] == '/' || abs_child[len_parent] == '\0')
+                {
                     /* exclude /a/abc /a/ab */
                     result = 1;
                 }

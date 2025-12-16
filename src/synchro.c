@@ -8,6 +8,7 @@
 #include <string.h>
 #include <sys/inotify.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "fileproc.h"
@@ -175,6 +176,17 @@ void synchronize(const char *source_base_dir, const char *destination_base_dir)
                         }
                         else if (event->mask & (IN_DELETE | IN_MOVED_FROM))
                         {
+                            /* wait 20ms and check if source exists */
+                            struct timespec req;
+                            req.tv_sec = 0;
+                            req.tv_nsec = 20 * 1000000;
+                            nanosleep(&req, NULL);
+                            if (access(source_base_dir, F_OK) == -1)
+                            {
+                                close(fd);
+                                return;
+                            }
+
                             unlink(full_dst_path);
                         }
                     }
@@ -290,7 +302,7 @@ int prep_dirs(char *src, char *dst, workerList *workers)
 }
 
 /* restore files from backup_dir to restore_dir */
-void restore(const char *restore_dir, const char *backup_dir)
+void restore(const char *restore_dir, const char *backup_dir, time_t creat_time)
 {
     /* handle file creation */
     DIR *b_dir = opendir(backup_dir);
@@ -321,13 +333,13 @@ void restore(const char *restore_dir, const char *backup_dir)
             create_directories(restore_full);
 
             /* restore recursively */
-            restore(restore_full, backup_full);
+            restore(restore_full, backup_full, creat_time);
         }
         else
         {
             struct stat r_st;
             /* copy if backup is modified later */
-            if (lstat(restore_full, &r_st) == -1 || b_st.st_mtime > b_st.st_ctime)
+            if (lstat(restore_full, &r_st) == -1 || (creat_time != NULL_TIME && b_st.st_mtime > creat_time))
             {
                 copy_single_file(backup_full, restore_full, backup_dir, restore_dir);
             }
